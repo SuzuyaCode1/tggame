@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SIM EMPIRE // TMA</title>
+    <!-- Telegram WebApp SDK & Supabase SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700;800&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="ambient-bg">
+        <div class="ambient-orb orb-1" id="orb1"></div>
+        <div class="ambient-orb orb-2"></div>
+    </div>
+    <div class="bg-grid"></div>
+
+    <canvas id="fxCanvas"></canvas>
+
+    <!-- Верхний HUD -->
+    <div class="hud-header">
+        <div class="balance-block">
+            <span class="hud-label" id="dbStatusDot">🟢 КАПИТАЛ</span>
+            <div class="balance-amount">
+                <span id="balanceNum">100</span> <span>$</span>
+            </div>
+        </div>
+        <div class="hud-right">
+            <div class="luck-indicator" id="luckBadge" style="display:none;">🍀 2X</div>
+            <button class="sound-btn" id="soundToggleBtn" onclick="toggleSound()">🔊</button>
+            <div class="price-badge" id="rollCostBadge">Тап: 5 $</div>
+        </div>
+    </div>
+
+    <div class="toast-pill" id="toast">Уведомление</div>
+
+    <!-- КАТ-СЦЕНА ЛЕГЕНДАРКИ / SECRET -->
+    <div class="cinematic-overlay" id="cineOverlay">
+        <div class="god-rays" id="godRays"></div>
+        <div class="cinematic-box">
+            <div class="cine-pill" id="cinePill">УЛЬТРА-РЕДКИЙ НОМЕР</div>
+            <div class="cine-heading" id="cineHeading">ЛЕГЕНДАРНЫЙ!</div>
+
+            <div class="cine-sim-showcase" id="cineShowcase">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div class="chip-metal"></div>
+                    <div class="sim-region-tag" id="cineRegion" style="margin:0;"></div>
+                </div>
+                <div class="cine-number" id="cineNumber">+888 0777 7777</div>
+                <div class="cine-price" id="cinePrice">15 000 $</div>
+            </div>
+
+            <div class="cine-reason-box">
+                <div class="cine-reason-lbl">ЭКСПЕРТНАЯ ОЦЕНКА КОМБИНАЦИИ:</div>
+                <div class="cine-reason-title" id="cineWhyTitle">💎 КВАДРО-НУЛИ + ТРИПЛ</div>
+                <div class="cine-reason-desc" id="cineWhyDesc">Описание редкости номера</div>
+            </div>
+
+            <button class="cine-claim-btn" id="cineBtn" onclick="closeCineModal()">
+                Забрать в коллекцию
+            </button>
+        </div>
+    </div>
+
+    <!-- МОДАЛКА АДМИН-ПАНЕЛИ -->
+    <div class="admin-modal" id="adminModal">
+        <div class="admin-box">
+            <div class="admin-header">
+                <div class="section-h1">🛠 Админ-панель</div>
+                <button class="close-admin-btn" onclick="closeAdminModal()">✕</button>
+            </div>
+            <p class="admin-hint">Введи Telegram ID игрока (или оставь свой ID ниже), чтобы выдать валюту, буст или сгенерировать редкий номер прямо в инвентарь.</p>
+
+            <label class="adm-lbl">Telegram ID получателя:</label>
+            <input type="text" id="admTargetId" class="adm-input" placeholder="Например: 123456789">
+
+            <div class="adm-card">
+                <div class="adm-card-title">💰 Выдача баланса ($)</div>
+                <div class="adm-row">
+                    <input type="number" id="admCashAmount" class="adm-input" value="1000" placeholder="Сумма $">
+                    <button class="adm-btn btn-green" onclick="adminGiveCash()">Выдать $</button>
+                </div>
+            </div>
+
+            <div class="adm-card">
+                <div class="adm-card-title">📲 Выдать номер в инвентарь</div>
+                <div class="adm-row">
+                    <select id="admCountrySelect" class="adm-select">
+                        <option value="ANON">🏴‍☠️ +888 (Anon)</option>
+                        <option value="UA">🇺🇦 +380 (UA)</option>
+                        <option value="RU">🇷🇺 +7 (RU)</option>
+                        <option value="BY">🇧🇾 +375 (BY)</option>
+                        <option value="KZ">🇰🇿 +7 (KZ)</option>
+                    </select>
+                    <select id="admRaritySelect" class="adm-select">
+                        <option value="secret">SECRET</option>
+                        <option value="legendary">Легендарный</option>
+                        <option value="mythic">Мифический</option>
+                        <option value="rare">Редкий</option>
+                    </select>
+                </div>
+                <button class="adm-btn btn-purple" style="width:100%; margin-top:8px;" onclick="adminGiveNumber()">Отправить номер игроку</button>
+            </div>
+
+            <div class="adm-card">
+                <div class="adm-card-title">⚡ Быстрые действия</div>
+                <div class="adm-row">
+                    <button class="adm-btn btn-blue" onclick="adminGiveLuck()">🍀 Выдать 2X Удачу (30м)</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Основной экран -->
+    <div class="viewport">
+        <!-- Вкладка 1: Спиннер -->
+        <div class="tab-screen active" id="tab-gen">
+            <div class="region-bar" id="regionBar"></div>
+
+            <div class="stage-center">
+                <div class="sim-3d-stage" id="simStage">
+                    <div class="sim-card" id="simCard">
+                        <div class="sim-glare" id="simGlare"></div>
+                        <div class="sim-pattern"></div>
+                        <div class="sim-watermark" id="simWatermark">VIP</div>
+                        <div class="sim-cutout"></div>
+
+                        <div class="sim-top-row">
+                            <div class="chip-metal" id="simChip"></div>
+                            <div class="sim-region-tag" id="cardRegionBadge">
+                                <span>🌐 Мульти-регион</span>
+                            </div>
+                        </div>
+
+                        <div class="sim-center-row">
+                            <div class="phone-number-display" id="phoneDisplay">+XXX XX XXX XX XX</div>
+                            <div class="reason-pill" id="reasonPill">Нажми кнопку ниже для генерации</div>
+                        </div>
+
+                        <div class="sim-bottom-row">
+                            <div class="rarity-chip" id="rarityBadge" style="color: var(--c-common)">Ожидание</div>
+                            <div class="sim-price-tag" id="priceDisplay">0 $</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-bar" id="actionBar">
+                    <button class="quick-sell-btn" id="quickSellBtn" onclick="sellLastDrop(event)">
+                        💰 Быстро продать за +0 $
+                    </button>
+                </div>
+
+                <button class="spin-btn" id="spinBtn" onclick="generateSim()">
+                    <span id="spinBtnTitle">⚡ Сгенерировать SIM</span>
+                    <span class="spin-sub" id="spinBtnSub">Номера мгновенно сохраняются в инвентарь</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Вкладка 2: Инвентарь -->
+        <div class="tab-screen" id="tab-inv">
+            <div class="section-top">
+                <div class="section-h1">Сейф SIM (<span id="invTitleCount">0</span>)</div>
+                <div class="inv-btn-group">
+                    <button class="chip-action-btn btn-blue" onclick="sellTrash(event)">Слить обычные</button>
+                    <button class="chip-action-btn btn-red" onclick="sellAll(event)">Продать всё</button>
+                </div>
+            </div>
+            <div class="inv-grid" id="invList"></div>
+        </div>
+
+        <!-- Вкладка 3: Бусты -->
+        <div class="tab-screen" id="tab-boosts">
+            <div class="section-top">
+                <div class="section-h1">🚀 Магазин Бустов</div>
+            </div>
+            <p class="sub-hint">Прокачивай оборудование, чтобы чаще ловить Легендарные и SECRET номера `+888`.</p>
+            <div class="boosts-list" id="boostsList"></div>
+        </div>
+
+        <!-- Вкладка 4: Рефералы (Друзья) -->
+        <div class="tab-screen" id="tab-refs">
+            <div class="section-top">
+                <div class="section-h1">🤝 Партнерская сеть</div>
+            </div>
+
+            <div class="ref-hero-card">
+                <div class="ref-hero-icon">🎁</div>
+                <div class="ref-hero-title">Платим +250 $ за каждого друга!</div>
+                <div class="ref-hero-desc">Приглашай друзей в SIM Empire через Telegram. Как только друг зайдет по твоей ссылке, вы <b>оба мгновенно получите по +250 $</b> на баланс.</div>
+                
+                <div class="ref-stats-row">
+                    <div class="ref-stat-pill">
+                        <span>Приглашено:</span>
+                        <b id="refCountVal">0 чел.</b>
+                    </div>
+                    <div class="ref-stat-pill">
+                        <span>Доход:</span>
+                        <b id="refEarnedVal" style="color:#10b981;">0 $</b>
+                    </div>
+                </div>
+
+                <button class="spin-btn" style="margin-top:14px; padding:15px;" onclick="shareInviteLink()">
+                    📤 Пригласить друга в Telegram
+                </button>
+                <button class="copy-ref-btn" onclick="copyInviteLink()">
+                    🔗 Скопировать реф-ссылку
+                </button>
+            </div>
+        </div>
+
+        <!-- Вкладка 5: Профиль -->
+        <div class="tab-screen" id="tab-prof">
+            <div class="section-top">
+                <div class="section-h1">👑 Профиль игрока</div>
+                <button class="chip-action-btn btn-purple" id="openAdminBtn" style="display:none;" onclick="openAdminModal()">🛠 Админка</button>
+            </div>
+
+            <div class="user-id-card">
+                <div>
+                    <div class="bento-lbl">Игрок Telegram</div>
+                    <div class="user-name-txt" id="profName">Загрузка...</div>
+                </div>
+                <div class="id-badge" onclick="copyMyId()">ID: <span id="profTgId">000000</span> 📋</div>
+            </div>
+
+            <div class="bento-grid">
+                <div class="bento-box">
+                    <div class="bento-lbl">Открыто SIM-карт</div>
+                    <div class="bento-val" id="statRolls">0</div>
+                </div>
+                <div class="bento-box">
+                    <div class="bento-lbl">Выручка с продаж</div>
+                    <div class="bento-val" id="statEarned" style="color: #10b981;">0 $</div>
+                </div>
+                <div class="bento-box">
+                    <div class="bento-lbl">Рекордный номер</div>
+                    <div class="bento-val" id="statBest" style="color: #f59e0b;">0 $</div>
+                </div>
+                <div class="bento-box">
+                    <div class="bento-lbl">Найдено SECRET</div>
+                    <div class="bento-val" id="statSecrets" style="color: #ff0055;">0</div>
+                </div>
+            </div>
+
+            <div class="odds-panel">
+                <div style="font-weight: 800; margin-bottom: 10px; font-size: 14px;">Базовые шансы и расценки (обычные SIM):</div>
+                <div class="odds-row"><span style="color: var(--c-common)">Обычный (1$ – 4$)</span><span>65%</span></div>
+                <div class="odds-row"><span style="color: var(--c-uncommon)">Необычный (6$ – 18$)</span><span>22%</span></div>
+                <div class="odds-row"><span style="color: var(--c-rare)">Редкий (25$ – 90$)</span><span>9%</span></div>
+                <div class="odds-row"><span style="color: var(--c-mythic)">Мифический (150$ – 500$)</span><span>3%</span></div>
+                <div class="odds-row"><span style="color: var(--c-legendary)">Легендарный (800$ – 2500$)</span><span>0.85%</span></div>
+                <div class="odds-row"><span class="secret-blur" style="padding: 2px 7px; border-radius: 6px;">SECRET (5000$ – 25000$)</span><span>0.15%</span></div>
+                <div style="margin-top:8px; font-size:11px; color:#94a3b8;">* Для анонимных номеров <b>+888</b> все цены умножаются в <b>10 раз</b>!</div>
+            </div>
+
+            <button onclick="giveFaucet(event)" class="faucet-btn">
+                🎁 Бесплатная дотация +35 $ (при балансе меньше 20 $)
+            </button>
+        </div>
+    </div>
+
+    <!-- Парящий нижний Док на 5 вкладок -->
+    <div class="floating-dock">
+        <button class="dock-tab active" onclick="switchTab('gen', this)">
+            <span class="dock-ico">⚡</span>
+            <span>Спиннер</span>
+        </button>
+        <button class="dock-tab" onclick="switchTab('inv', this)">
+            <span class="dock-ico">💼</span>
+            <span>Сейф</span>
+            <span class="dock-counter" id="dockCounter">0</span>
+        </button>
+        <button class="dock-tab" onclick="switchTab('boosts', this)">
+            <span class="dock-ico">🚀</span>
+            <span>Бусты</span>
+        </button>
+        <button class="dock-tab" onclick="switchTab('refs', this)">
+            <span class="dock-ico">🤝</span>
+            <span>Друзья</span>
+        </button>
+        <button class="dock-tab" onclick="switchTab('prof', this)">
+            <span class="dock-ico">👑</span>
+            <span>Профиль</span>
+        </button>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
