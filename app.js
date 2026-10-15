@@ -14,13 +14,17 @@ if (tg) {
 
 let sb = null;
 if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase) {
-    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    try {
+        sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } catch (e) {
+        console.error('Supabase init error:', e);
+    }
 }
 
 const tgUser = tg?.initDataUnsafe?.user || {
     id: '999999',
     first_name: 'Web',
-    username: 'local_tester'
+    username: 'ADMIN | SIM Empire'
 };
 const USER_ID = String(tgUser.id);
 const USER_NAME = tgUser.username ? `@${tgUser.username}` : (tgUser.first_name || 'Игрок');
@@ -221,7 +225,6 @@ function sortInventory() {
     });
 }
 
-// Считает пассивный доход в минуту от всех заблокированных (🔒) номеров (2% от их цены в минуту)
 function getPassiveIncomePerMin() {
     const lockedTotal = state.inventory
         .filter(i => i.locked)
@@ -229,7 +232,6 @@ function getPassiveIncomePerMin() {
     return Math.floor(lockedTotal * 0.02);
 }
 
-// Начисление пассивного дохода каждые 15 секунд
 setInterval(() => {
     const perMin = getPassiveIncomePerMin();
     if (perMin >= 4) {
@@ -260,21 +262,27 @@ async function initApp() {
     }
 
     if (sb) {
-        document.getElementById('dbStatusDot').textContent = '☁️ CLOUD КАПИТАЛ';
-        const { data, error } = await sb.from('sim_players').select('*').eq('tg_id', USER_ID).maybeSingle();
-        if (data) {
-            state.balance = Number(data.balance);
-            state.rolls = Number(data.rolls);
-            state.earned = Number(data.earned);
-            state.bestDrop = Number(data.best_drop);
-            state.secretsCount = Number(data.secrets_count);
-            state.inventory = data.inventory || [];
-            state.boosts = { ...state.boosts, ...(data.boosts || {}) };
-            state.referredBy = data.referred_by;
-            state.referralsCount = Number(data.referrals_count || 0);
-            state.refEarnings = Number(data.ref_earnings || 0);
-        } else if (!error) {
-            await syncToSupabase();
+        try {
+            const { data, error } = await sb.from('sim_players').select('*').eq('tg_id', USER_ID).maybeSingle();
+            if (!error) {
+                document.getElementById('dbStatusDot').textContent = '☁️ CLOUD КАПИТАЛ';
+                if (data) {
+                    state.balance = Number(data.balance);
+                    state.rolls = Number(data.rolls);
+                    state.earned = Number(data.earned);
+                    state.bestDrop = Number(data.best_drop);
+                    state.secretsCount = Number(data.secrets_count);
+                    state.inventory = data.inventory || [];
+                    state.boosts = { ...state.boosts, ...(data.boosts || {}) };
+                    state.referredBy = data.referred_by;
+                    state.referralsCount = Number(data.referrals_count || 0);
+                    state.refEarnings = Number(data.ref_earnings || 0);
+                } else {
+                    await syncToSupabase();
+                }
+            }
+        } catch (err) {
+            console.warn('Supabase sync skipped:', err);
         }
     }
 
@@ -290,21 +298,25 @@ async function initApp() {
 
 async function syncToSupabase() {
     if (!sb) return;
-    await sb.from('sim_players').upsert({
-        tg_id: USER_ID,
-        username: USER_NAME,
-        balance: state.balance,
-        rolls: state.rolls,
-        earned: state.earned,
-        best_drop: state.bestDrop,
-        secrets_count: state.secretsCount,
-        inventory: state.inventory,
-        boosts: state.boosts,
-        referred_by: state.referredBy,
-        referrals_count: state.referralsCount,
-        ref_earnings: state.refEarnings,
-        updated_at: new Date().toISOString()
-    });
+    try {
+        await sb.from('sim_players').upsert({
+            tg_id: USER_ID,
+            username: USER_NAME,
+            balance: state.balance,
+            rolls: state.rolls,
+            earned: state.earned,
+            best_drop: state.bestDrop,
+            secrets_count: state.secretsCount,
+            inventory: state.inventory,
+            boosts: state.boosts,
+            referred_by: state.referredBy,
+            referrals_count: state.referralsCount,
+            ref_earnings: state.refEarnings,
+            updated_at: new Date().toISOString()
+        });
+    } catch (e) {
+        console.warn('Sync error:', e);
+    }
 }
 
 function saveGame() {
@@ -326,16 +338,18 @@ async function applyReferralReward(inviterId) {
     }
 
     if (sb) {
-        const { data: inviter } = await sb.from('sim_players').select('*').eq('tg_id', cleanId).maybeSingle();
-        if (!inviter) {
-            showToast('❌ Игрок с таким ID не найден в базе');
-            return false;
+        try {
+            const { data: inviter } = await sb.from('sim_players').select('*').eq('tg_id', cleanId).maybeSingle();
+            if (inviter) {
+                await sb.from('sim_players').update({
+                    balance: Number(inviter.balance) + 250,
+                    referrals_count: Number(inviter.referrals_count || 0) + 1,
+                    ref_earnings: Number(inviter.ref_earnings || 0) + 250
+                }).eq('tg_id', cleanId);
+            }
+        } catch (e) {
+            console.warn('Ref DB update skipped:', e);
         }
-        await sb.from('sim_players').update({
-            balance: Number(inviter.balance) + 250,
-            referrals_count: Number(inviter.referrals_count || 0) + 1,
-            ref_earnings: Number(inviter.ref_earnings || 0) + 250
-        }).eq('tg_id', cleanId);
     }
 
     state.referredBy = cleanId;
@@ -344,7 +358,7 @@ async function applyReferralReward(inviterId) {
     haptic('success');
     animateBalanceTo(state.balance);
     saveGame();
-    showToast('🎉 Успешно! Начислено +250 $ тебе и другу!');
+    showToast('🎉 Начислено +250 $ за код друга!');
     return true;
 }
 
@@ -367,48 +381,70 @@ async function checkReferralStartParam() {
 
 async function redeemManualRef() {
     const inputVal = document.getElementById('manualRefInput').value.trim();
-    if (!inputVal) return showToast('Введи ID друга!');
+    if (!inputVal) return showToast('Введи ID друга в поле!');
     await applyReferralReward(inputVal);
 }
 
 /* ==========================================================
-   ЛИДЕРБОРД И ПРОСМОТР ЧУЖИХ СЕЙФОВ
+   ЛИДЕРБОРД И ПРОСМОТР ЧУЖИХ СЕЙФОВ (С ЗАЩИТОЙ ОТ ОШИБОК БД)
    ========================================================== */
 async function loadLeaderboard() {
     const listEl = document.getElementById('leaderboardList');
-    if (!sb) {
-        listEl.innerHTML = '<div style="text-align:center; color:var(--subtext); font-size:12px;">Подключи Supabase для общего рейтинга</div>';
-        return;
+    const hintEl = document.getElementById('lbStatusHint');
+
+    // Сразу обеспечиваем себе место в списке на случай, если БД еще не настроена
+    const myInvVal = state.inventory.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+    const myEntry = {
+        tg_id: USER_ID,
+        username: USER_NAME,
+        balance: state.balance,
+        netWorth: state.balance + myInvVal,
+        rolls: state.rolls,
+        secretsCount: state.secretsCount,
+        inventory: state.inventory
+    };
+
+    let rowsFromDb = null;
+
+    if (sb) {
+        try {
+            // Сначала синхронизируем себя в базу
+            await syncToSupabase();
+            const { data, error } = await sb
+                .from('sim_players')
+                .select('tg_id, username, balance, inventory, rolls, secrets_count')
+                .limit(50);
+
+            if (error) {
+                console.warn('Leaderboard error:', error.message);
+                if (hintEl) hintEl.textContent = `Локальный режим (Выполни SQL в Supabase: ${error.code || 'нет таблицы'})`;
+            } else if (data && data.length > 0) {
+                rowsFromDb = data;
+                if (hintEl) hintEl.textContent = 'Нажми на игрока, чтобы посмотреть его сейф';
+            }
+        } catch (e) {
+            console.warn('Leaderboard fetch failed:', e);
+        }
     }
 
-    const { data, error } = await sb
-        .from('sim_players')
-        .select('tg_id, username, balance, inventory, rolls, secrets_count')
-        .limit(50);
-
-    if (error || !data) {
-        listEl.innerHTML = '<div style="text-align:center; color:var(--subtext); font-size:12px;">Не удалось загрузить рейтинг</div>';
-        return;
-    }
-
-    cachedLeaderboardPlayers = data.map(p => {
-        const inv = Array.isArray(p.inventory) ? p.inventory : [];
-        const invValue = inv.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
-        const netWorth = Number(p.balance || 0) + invValue;
-        return {
-            tg_id: String(p.tg_id),
-            username: p.username || `ID ${p.tg_id}`,
-            balance: Number(p.balance || 0),
-            netWorth,
-            rolls: Number(p.rolls || 0),
-            secretsCount: Number(p.secrets_count || 0),
-            inventory: inv
-        };
-    }).sort((a, b) => b.netWorth - a.netWorth).slice(0, 15);
-
-    if (cachedLeaderboardPlayers.length === 0) {
-        listEl.innerHTML = '<div style="text-align:center; color:var(--subtext); font-size:12px;">Пока нет игроков</div>';
-        return;
+    if (rowsFromDb) {
+        cachedLeaderboardPlayers = rowsFromDb.map(p => {
+            const inv = Array.isArray(p.inventory) ? p.inventory : [];
+            const invValue = inv.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+            const netWorth = Number(p.balance || 0) + invValue;
+            return {
+                tg_id: String(p.tg_id),
+                username: p.username || `ID ${p.tg_id}`,
+                balance: Number(p.balance || 0),
+                netWorth,
+                rolls: Number(p.rolls || 0),
+                secretsCount: Number(p.secrets_count || 0),
+                inventory: inv
+            };
+        }).sort((a, b) => b.netWorth - a.netWorth).slice(0, 15);
+    } else {
+        // Резервный список, чтобы Лидерборд всегда работал и не писал ошибку
+        cachedLeaderboardPlayers = [myEntry];
     }
 
     listEl.innerHTML = cachedLeaderboardPlayers.map((p, idx) => {
@@ -1070,7 +1106,7 @@ function getInviteLink() {
 
 function shareInviteLink() {
     const link = getInviteLink();
-    const text = `Залетай в SIM Empire! Выбивай блатные номера +888 и вводи мой код ${USER_ID} (или жми по ссылке) ради +250$ бонуса 🔥`;
+    const text = `Залетай в SIM Empire! Выбивай блатные номера +888 и вводи мой ID ${USER_ID} во вкладке «Друзья» ради +250$ бонуса 🔥`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
     if (tg?.openTelegramLink) {
         tg.openTelegramLink(shareUrl);
@@ -1092,37 +1128,211 @@ function copyMyId() {
 }
 
 /* ==========================================================
-   АДМИН-ПАНЕЛЬ
+   АВТО-СИНХРОНИЗАЦИЯ ПОДАРКОВ ОТ АДМИНА (КАЖДЫЕ 6 СЕК)
    ========================================================== */
-function openAdminModal() { document.getElementById('adminModal').classList.add('show'); }
-function closeAdminModal() { document.getElementById('adminModal').classList.remove('show'); }
+setInterval(async () => {
+    if (!sb) return;
+    try {
+        const { data, error } = await sb.from('sim_players').select('*').eq('tg_id', USER_ID).maybeSingle();
+        if (error || !data) return;
+
+        let changed = false;
+
+        // Если админ начислил баланс в БД
+        if (Number(data.balance) > state.balance) {
+            const diff = Number(data.balance) - state.balance;
+            state.balance = Number(data.balance);
+            animateBalanceTo(state.balance);
+            showToast(`🎁 Получено +${diff.toLocaleString()} $!`);
+            sfxCash();
+            changed = true;
+        }
+
+        // Если админ прислал номер в инвентарь
+        const dbInv = Array.isArray(data.inventory) ? data.inventory : [];
+        if (dbInv.length > state.inventory.length) {
+            state.inventory = dbInv;
+            showToast('📲 Получен новый номер в Сейф!');
+            sfxRarityDrop('rare');
+            changed = true;
+        }
+
+        // Если админ выдал бусты
+        if (data.boosts) {
+            const b = data.boosts;
+            if (
+                (b.luckUntil || 0) > (state.boosts.luckUntil || 0) ||
+                (b.priceLevel || 0) > (state.boosts.priceLevel || 0) ||
+                (b.fastSpin && !state.boosts.fastSpin) ||
+                (b.vip888 && !state.boosts.vip888)
+            ) {
+                state.boosts = { ...state.boosts, ...b };
+                renderBoosts();
+                renderRegionBar();
+                showToast('🚀 Администратор выдал тебе буст!');
+                sfxCash();
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            sortInventory();
+            localStorage.setItem(`sim_empire_v6_${USER_ID}`, JSON.stringify(state));
+            updateUI();
+        }
+    } catch (e) {}
+}, 6000);
+
+/* ==========================================================
+   АДМИН-ПАНЕЛЬ (ВЫДАЧА ВАЛЮТЫ, БУСТОВ И НОМЕРОВ)
+   ========================================================== */
+async function openAdminModal() {
+    document.getElementById('adminModal').classList.add('show');
+    document.getElementById('admStatusLog').textContent = 'Загрузка списка игроков...';
+
+    const selectEl = document.getElementById('admPlayerList');
+    if (!sb) {
+        document.getElementById('admStatusLog').textContent = '⚠️ Нет подключения к Supabase';
+        return;
+    }
+
+    const { data, error } = await sb.from('sim_players').select('tg_id, username, balance').order('updated_at', { ascending: false }).limit(50);
+    if (error) {
+        document.getElementById('admStatusLog').textContent = `❌ Ошибка БД: ${error.message} (выполни SQL запрос в Supabase!)`;
+        return;
+    }
+
+    document.getElementById('admStatusLog').textContent = `🟢 База подключена (игроков: ${data.length})`;
+    selectEl.innerHTML = `<option value="${USER_ID}">👑 Я (${USER_NAME} — ${USER_ID})</option>` +
+        data.filter(u => String(u.tg_id) !== USER_ID).map(u => 
+            `<option value="${u.tg_id}">${u.username || 'Игрок'} (ID: ${u.tg_id}) — ${Number(u.balance || 0).toLocaleString()} $</option>`
+        ).join('');
+}
+
+function closeAdminModal() {
+    document.getElementById('adminModal').classList.remove('show');
+}
+
+function selectAdminTarget(val) {
+    if (val) document.getElementById('admTargetId').value = val;
+}
+
+function setAdminLog(msg, isError = false) {
+    const el = document.getElementById('admStatusLog');
+    if (el) {
+        el.style.color = isError ? '#f87171' : '#34d399';
+        el.textContent = msg;
+    }
+    showToast(msg);
+}
+
+// Вспомогательная загрузка или создание профиля целевого игрока в БД
+async function getOrCreateTargetPlayer(targetId) {
+    const { data, error } = await sb.from('sim_players').select('*').eq('tg_id', targetId).maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data) return data;
+
+    const freshProfile = {
+        tg_id: targetId,
+        username: `ID_${targetId}`,
+        balance: 100,
+        rolls: 0,
+        earned: 0,
+        best_drop: 0,
+        secrets_count: 0,
+        inventory: [],
+        boosts: { luckUntil: 0, priceLevel: 0, fastSpin: false, vip888: false }
+    };
+    const { error: insErr } = await sb.from('sim_players').upsert(freshProfile);
+    if (insErr) throw new Error(insErr.message);
+    return freshProfile;
+}
 
 async function adminGiveCash() {
     const targetId = document.getElementById('admTargetId').value.trim();
     const amount = Number(document.getElementById('admCashAmount').value);
-    if (!targetId || isNaN(amount)) return showToast('Укажи ID и сумму');
+    if (!targetId || isNaN(amount)) return setAdminLog('❌ Укажи ID и сумму!', true);
 
     if (targetId === USER_ID) {
         state.balance += amount;
         animateBalanceTo(state.balance);
         saveGame();
-        showToast(`✅ Выдано ${amount} $ себе на баланс`);
-        return;
+        return setAdminLog(`✅ Выдано +${amount.toLocaleString()} $ себе на баланс!`);
     }
 
-    if (!sb) return showToast('Нет связи с БД');
-    const { data: user } = await sb.from('sim_players').select('balance').eq('tg_id', targetId).maybeSingle();
-    if (!user) return showToast('Игрок с таким ID не найден в БД');
+    if (!sb) return setAdminLog('❌ Нет связи с Supabase', true);
+    try {
+        const user = await getOrCreateTargetPlayer(targetId);
+        const newBal = Number(user.balance || 0) + amount;
+        const { error } = await sb.from('sim_players').update({
+            balance: newBal,
+            updated_at: new Date().toISOString()
+        }).eq('tg_id', targetId);
 
-    await sb.from('sim_players').update({ balance: Number(user.balance) + amount }).eq('tg_id', targetId);
-    showToast(`✅ Игроку ${targetId} начислено +${amount} $!`);
-    loadLeaderboard();
+        if (error) throw new Error(error.message);
+        sfxCash();
+        setAdminLog(`✅ Игроку ${targetId} начислено +${amount.toLocaleString()} $ (Баланс: ${newBal.toLocaleString()} $)!`);
+        loadLeaderboard();
+    } catch (err) {
+        setAdminLog(`❌ Ошибка БД: ${err.message}`, true);
+    }
+}
+
+async function adminGiveBoost() {
+    const targetId = document.getElementById('admTargetId').value.trim();
+    const boostType = document.getElementById('admBoostSelect').value;
+    if (!targetId) return setAdminLog('❌ Укажи ID игрока!', true);
+
+    const applyBoostLogic = (bObj) => {
+        const b = { luckUntil: 0, priceLevel: 0, fastSpin: false, vip888: false, ...(bObj || {}) };
+        if (boostType === 'luck' || boostType === 'all') {
+            const base = Math.max(Date.now(), b.luckUntil || 0);
+            b.luckUntil = base + 30 * 60 * 1000;
+        }
+        if (boostType === 'price' || boostType === 'all') {
+            b.priceLevel = boostType === 'all' ? 5 : Math.min(5, (b.priceLevel || 0) + 1);
+        }
+        if (boostType === 'fast' || boostType === 'all') {
+            b.fastSpin = true;
+        }
+        if (boostType === 'vip888' || boostType === 'all') {
+            b.vip888 = true;
+        }
+        return b;
+    };
+
+    if (targetId === USER_ID) {
+        state.boosts = applyBoostLogic(state.boosts);
+        renderBoosts();
+        renderRegionBar();
+        saveGame();
+        sfxCash();
+        return setAdminLog('✅ Буст успешно активирован на твой аккаунт!');
+    }
+
+    if (!sb) return setAdminLog('❌ Нет связи с Supabase', true);
+    try {
+        const user = await getOrCreateTargetPlayer(targetId);
+        const updatedBoosts = applyBoostLogic(user.boosts);
+
+        const { error } = await sb.from('sim_players').update({
+            boosts: updatedBoosts,
+            updated_at: new Date().toISOString()
+        }).eq('tg_id', targetId);
+
+        if (error) throw new Error(error.message);
+        sfxCash();
+        setAdminLog(`🚀 Буст успешно выдан игроку ${targetId}!`);
+    } catch (err) {
+        setAdminLog(`❌ Ошибка БД: ${err.message}`, true);
+    }
 }
 
 async function adminGiveNumber() {
     const targetId = document.getElementById('admTargetId').value.trim();
     const countryId = document.getElementById('admCountrySelect').value;
     const rarityId = document.getElementById('admRaritySelect').value;
+    if (!targetId) return setAdminLog('❌ Укажи ID игрока!', true);
 
     const country = COUNTRIES.find(c => c.id === countryId) || COUNTRIES[0];
     const rarity = RARITIES.find(r => r.id === rarityId) || RARITIES[5];
@@ -1136,34 +1346,22 @@ async function adminGiveNumber() {
         return;
     }
 
-    if (!sb) return showToast('Нет связи с БД');
-    const { data: user } = await sb.from('sim_players').select('inventory').eq('tg_id', targetId).maybeSingle();
-    if (!user) return showToast('Игрок не найден в БД');
+    if (!sb) return setAdminLog('❌ Нет связи с Supabase', true);
+    try {
+        const user = await getOrCreateTargetPlayer(targetId);
+        const updatedInv = [giftItem, ...(Array.isArray(user.inventory) ? user.inventory : [])];
 
-    const updatedInv = [giftItem, ...(user.inventory || [])];
-    await sb.from('sim_players').update({ inventory: updatedInv }).eq('tg_id', targetId);
-    showToast(`🎁 Номер ${giftItem.number} отправлен игроку ${targetId}!`);
-}
+        const { error } = await sb.from('sim_players').update({
+            inventory: updatedInv,
+            updated_at: new Date().toISOString()
+        }).eq('tg_id', targetId);
 
-async function adminGiveLuck() {
-    const targetId = document.getElementById('admTargetId').value.trim();
-    const until = Date.now() + 30 * 60 * 1000;
-
-    if (targetId === USER_ID) {
-        state.boosts.luckUntil = until;
-        saveGame();
-        renderBoosts();
-        showToast('🍀 Выдана Удача 2X на 30 минут!');
-        return;
+        if (error) throw new Error(error.message);
+        sfxCash();
+        setAdminLog(`🎁 Номер ${giftItem.number} отправлен в сейф игроку ${targetId}!`);
+    } catch (err) {
+        setAdminLog(`❌ Ошибка БД: ${err.message}`, true);
     }
-
-    if (!sb) return showToast('Нет связи с БД');
-    const { data: user } = await sb.from('sim_players').select('boosts').eq('tg_id', targetId).maybeSingle();
-    if (!user) return showToast('Игрок не найден');
-
-    const newBoosts = { ...(user.boosts || {}), luckUntil: until };
-    await sb.from('sim_players').update({ boosts: newBoosts }).eq('tg_id', targetId);
-    showToast(`🍀 Удача 2X выдана игроку ${targetId}!`);
 }
 
 /* ==========================================================
@@ -1206,7 +1404,7 @@ function sellFromInventory(id, e) {
 
     if (item.locked) {
         haptic('warning');
-        return showToast('🔒 Сними замок, чтобы продать этот номер!');
+        return showToast('🔒 Сними замок SAFE, чтобы продать этот номер!');
     }
 
     state.balance += item.price;
@@ -1245,7 +1443,7 @@ function sellTrash(e) {
 
 function sellAll(e) {
     const sellable = state.inventory.filter(i => !i.locked);
-    if (sellable.length === 0) return showToast('Все номера в сейфе защищены замком 🔒!');
+    if (sellable.length === 0) return showToast('Все номера в сейфе защищены замком SAFE!');
 
     let sum = 0;
     sellable.forEach(i => sum += i.price);
@@ -1324,9 +1522,18 @@ function updateUI() {
     document.getElementById('refCountVal').textContent = `${state.referralsCount || 0} чел.`;
     document.getElementById('refEarnedVal').textContent = `${(state.refEarnings || 0).toLocaleString()} $`;
 
+    // Отображение блока ввода реф-кода
     const manualBox = document.getElementById('manualRefBox');
-    if (manualBox) {
-        manualBox.style.display = state.referredBy ? 'none' : 'block';
+    const claimedBox = document.getElementById('refAlreadyClaimedBox');
+    if (manualBox && claimedBox) {
+        if (state.referredBy) {
+            manualBox.style.display = 'none';
+            claimedBox.style.display = 'block';
+            document.getElementById('claimedInviterId').textContent = state.referredBy;
+        } else {
+            manualBox.style.display = 'block';
+            claimedBox.style.display = 'none';
+        }
     }
 
     const list = document.getElementById('invList');
@@ -1344,6 +1551,7 @@ function updateUI() {
             : `<img src="${item.flag}" alt="">`;
 
         const isLocked = !!item.locked;
+        const itemPassive = Math.max(1, Math.floor((Number(item.price) || 0) * 0.02));
 
         return `
             <div class="inv-row-card ${isLocked ? 'is-locked' : ''}" style="border-left-color: ${item.rarity.color}">
@@ -1357,14 +1565,23 @@ function updateUI() {
                     </div>
                 </div>
                 <div class="inv-actions-right">
-                    <button class="upgrade-sim-btn" onclick="upgradeSimItem(${item.id})" title="Шанс 45% удвоить цену">
-                        ⚡2X
+                    ${!isLocked ? `
+                        <button class="upgrade-sim-btn" onclick="upgradeSimItem(${item.id})" title="Шанс 45% удвоить цену">
+                            ⚡2X
+                        </button>
+                    ` : ''}
+
+                    <button class="lock-btn ${isLocked ? 'locked' : ''}" onclick="toggleLockItem(${item.id})" title="Сейф-защита и пассивный доход">
+                        <svg class="lock-svg" viewBox="0 0 24 24">
+                            <path class="lock-shackle" d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                            <rect x="3" y="11" width="18" height="11" rx="3" ry="3"></rect>
+                            <circle cx="12" cy="16.5" r="1.5" fill="currentColor" stroke="none"></circle>
+                        </svg>
+                        ${isLocked ? `<span class="lock-status-txt">SAFE</span>` : ''}
                     </button>
-                    <button class="lock-btn ${isLocked ? 'locked' : ''}" onclick="toggleLockItem(${item.id})" title="Защитить и получать пассивный доход">
-                        ${isLocked ? '🔒' : '🔓'}
-                    </button>
+
                     <button class="inv-sell-trigger ${isLocked ? 'disabled-lock' : ''}" onclick="sellFromInventory(${item.id}, event)">
-                        ${isLocked ? 'Стейкинг' : `+${item.price.toLocaleString()}$`}
+                        ${isLocked ? `+${itemPassive}$/м` : `+${item.price.toLocaleString()}$`}
                     </button>
                 </div>
             </div>

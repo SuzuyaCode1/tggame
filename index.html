@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700;800&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=4">
+    <link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 
@@ -80,18 +80,24 @@
         </div>
     </div>
 
-    <!-- МОДАЛКА АДМИН-ПАНЕЛИ -->
+   <!-- МОДАЛКА АДМИН-ПАНЕЛИ -->
     <div class="admin-modal" id="adminModal">
         <div class="admin-box">
             <div class="admin-header">
                 <div class="section-h1">🛠 Админ-панель</div>
                 <button class="close-admin-btn" onclick="closeAdminModal()">✕</button>
             </div>
-            <p class="admin-hint">Введи Telegram ID игрока (или оставь свой ID ниже), чтобы выдать валюту, буст или сгенерировать редкий номер прямо в инвентарь.</p>
+            <p class="admin-hint">Выбери игрока из списка или впиши его Telegram ID вручную:</p>
+
+            <label class="adm-lbl">Быстрый выбор игрока из базы:</label>
+            <select id="admPlayerList" class="adm-select" style="margin-bottom: 8px;" onchange="selectAdminTarget(this.value)">
+                <option value="">-- Выбери игрока из БД --</option>
+            </select>
 
             <label class="adm-lbl">Telegram ID получателя:</label>
             <input type="text" id="admTargetId" class="adm-input" placeholder="Например: 5268549164">
 
+            <!-- Выдача денег -->
             <div class="adm-card">
                 <div class="adm-card-title">💰 Выдача баланса ($)</div>
                 <div class="adm-row">
@@ -100,6 +106,22 @@
                 </div>
             </div>
 
+            <!-- Выдача ВСЕХ бустов -->
+            <div class="adm-card">
+                <div class="adm-card-title">🚀 Выдача бустов игроку</div>
+                <div class="adm-row">
+                    <select id="admBoostSelect" class="adm-select">
+                        <option value="luck">🍀 Удача 2X (+30 мин)</option>
+                        <option value="price">📈 Наценка барыги (+1 ур.)</option>
+                        <option value="fast">⚡ Турбо-декодер (Навсегда)</option>
+                        <option value="vip888">🏴‍☠️ Лицензия +888 (Навсегда)</option>
+                        <option value="all">🔥 ПОЛНЫЙ ПАКЕТ БУСТОВ</option>
+                    </select>
+                </div>
+                <button class="adm-btn btn-blue" style="width:100%; margin-top:8px;" onclick="adminGiveBoost()">Выдать выбранный буст</button>
+            </div>
+
+            <!-- Выдача номера -->
             <div class="adm-card">
                 <div class="adm-card-title">📲 Выдать номер в инвентарь</div>
                 <div class="adm-row">
@@ -120,12 +142,7 @@
                 <button class="adm-btn btn-purple" style="width:100%; margin-top:8px;" onclick="adminGiveNumber()">Отправить номер игроку</button>
             </div>
 
-            <div class="adm-card">
-                <div class="adm-card-title">⚡ Быстрые действия</div>
-                <div class="adm-row">
-                    <button class="adm-btn btn-blue" style="width:100%;" onclick="adminGiveLuck()">🍀 Выдать 2X Удачу (30м)</button>
-                </div>
-            </div>
+            <div id="admStatusLog" style="margin-top:10px; font-size:12px; color:#34d399; text-align:center; font-weight:700;"></div>
         </div>
     </div>
 
@@ -180,7 +197,7 @@
             <div class="section-top">
                 <div>
                     <div class="section-h1">Сейф SIM (<span id="invTitleCount">0</span>)</div>
-                    <div style="font-size:11px; color:var(--subtext); margin-top:2px;">🔒 Замок дает пассивный доход • ⚡ 2X — риск-апгрейд цены (45%)</div>
+                    <div style="font-size:11px; color:var(--subtext); margin-top:2px;">🔒 SAFE дает пассивный доход • ⚡ 2X — риск-апгрейд цены (45%)</div>
                 </div>
                 <div class="inv-btn-group">
                     <button class="chip-action-btn btn-blue" onclick="sellTrash(event)">Слить обычные</button>
@@ -205,10 +222,24 @@
                 <div class="section-h1">🤝 Партнерская сеть</div>
             </div>
 
+            <!-- БЛОК ВВОДА КОДА ДРУГА ТЕПЕРЬ СВЕРХУ И ВСЕГДА ВИДЕН -->
+            <div class="ref-hero-card" style="margin-bottom: 12px; border-color: rgba(16, 185, 129, 0.4); background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(18, 23, 38, 0.85));">
+                <div style="font-size: 15px; font-weight: 900; color: #34d399; margin-bottom: 6px;">💸 Введи ID друга и получи +250 $</div>
+                <div style="font-size: 12px; color: #cbd5e1; margin-bottom: 10px;">Если тебя позвал кент — впиши его Telegram ID ниже, и вы оба сразу получите по <b>250 $</b>!</div>
+                <div id="manualRefBox">
+                    <div class="adm-row">
+                        <input type="text" id="manualRefInput" class="adm-input" inputmode="numeric" placeholder="ID друга (напр. 5268549164)">
+                        <button class="adm-btn btn-green" onclick="redeemManualRef()">Забрать 250$</button>
+                    </div>
+                </div>
+                <div id="refAlreadyClaimedBox" style="display:none; padding: 10px; border-radius: 12px; background: rgba(16, 185, 129, 0.18); color: #34d399; font-weight: 800; font-size: 13px;">
+                    ✅ Ты уже активировал код приглашения (ID: <span id="claimedInviterId"></span>) и получил +250 $!
+                </div>
+            </div>
+
             <div class="ref-hero-card">
-                <div class="ref-hero-icon">🎁</div>
-                <div class="ref-hero-title">Платим +250 $ за каждого друга!</div>
-                <div class="ref-hero-desc">Приглашай друзей по ссылке или дай им свой <b>Telegram ID (<span id="myRefCodeTxt"></span>)</b>. Вы оба получите по <b>+250 $</b>!</div>
+                <div class="ref-hero-title">Твой код для друзей: <span id="myRefCodeTxt" style="color:#60a5fa; font-family:'JetBrains Mono',monospace;"></span></div>
+                <div class="ref-hero-desc">Отправь друзьям ссылку или скажи им ввести твой ID сверху во вкладке «Друзья». За каждого — <b>+250 $</b>!</div>
                 
                 <div class="ref-stats-row">
                     <div class="ref-stat-pill">
@@ -227,14 +258,6 @@
                 <button class="copy-ref-btn" onclick="copyInviteLink()">
                     🔗 Скопировать реф-ссылку
                 </button>
-
-                <div class="manual-ref-box" id="manualRefBox">
-                    <div class="adm-lbl" style="text-align:left; margin-bottom:6px;">Пришел от друга? Введи его ID и получи +250 $:</div>
-                    <div class="adm-row">
-                        <input type="text" id="manualRefInput" class="adm-input" placeholder="ID друга (например: 5268549164)">
-                        <button class="adm-btn btn-green" onclick="redeemManualRef()">Забрать 250$</button>
-                    </div>
-                </div>
             </div>
         </div>
 
@@ -277,7 +300,7 @@
                 <div class="lb-header">
                     <div>
                         <div style="font-weight:900; font-size:15px;">🏆 Топ магнатов SIM Empire</div>
-                        <div style="font-size:11px; color:var(--subtext);">Нажми на игрока, чтобы посмотреть его сейф</div>
+                        <div style="font-size:11px; color:var(--subtext);" id="lbStatusHint">Нажми на игрока, чтобы посмотреть его сейф</div>
                     </div>
                     <button class="chip-action-btn btn-blue" onclick="loadLeaderboard()">🔄 Обновить</button>
                 </div>
@@ -328,6 +351,6 @@
         </button>
     </div>
 
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=10"></script>
 </body>
 </html>
