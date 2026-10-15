@@ -232,16 +232,115 @@ function getPassiveIncomePerMin() {
     return Math.floor(lockedTotal * 0.02);
 }
 
-setInterval(() => {
-    const perMin = getPassiveIncomePerMin();
-    if (perMin >= 4) {
-        const tickReward = Math.max(1, Math.round(perMin / 4));
-        state.balance += tickReward;
-        state.earned += tickReward;
-        animateBalanceTo(state.balance);
-        saveGame();
+/* ==========================================================
+   КАТ-СЦЕНА ПОДАРКА ОТ АДМИНА
+   ========================================================== */
+function triggerAdminGiftAnimation(type, mainText, subText) {
+    document.body.classList.remove('screen-shake');
+    void document.body.offsetWidth;
+    document.body.classList.add('screen-shake');
+
+    haptic('heavy');
+    setTimeout(() => haptic('success'), 160);
+    setTimeout(() => haptic('heavy'), 320);
+
+    const overlay = document.getElementById('adminGiftOverlay');
+    const rays = document.getElementById('adminGiftRays');
+    const heading = document.getElementById('adminGiftHeading');
+    const showcase = document.getElementById('adminGiftShowcase');
+    const icon = document.getElementById('adminGiftIcon');
+    const val = document.getElementById('adminGiftVal');
+    const sub = document.getElementById('adminGiftSub');
+    const btn = document.getElementById('adminGiftBtn');
+
+    if (type === 'cash') {
+        icon.textContent = '💸';
+        heading.textContent = 'ДЕНЕЖНЫЙ ДРОП!';
+        heading.style.color = '#34d399';
+        rays.style.setProperty('--beam-color', 'rgba(16, 185, 129, 0.4)');
+        showcase.style.borderColor = '#10b981';
+        showcase.style.boxShadow = '0 0 65px rgba(16, 185, 129, 0.45)';
+        btn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+        burstParticles('#10b981', 80);
+    } else if (type === 'boost') {
+        icon.textContent = '🚀';
+        heading.textContent = 'VIP УСИЛЕНИЕ!';
+        heading.style.color = '#c084fc';
+        rays.style.setProperty('--beam-color', 'rgba(168, 85, 247, 0.42)');
+        showcase.style.borderColor = '#a855f7';
+        showcase.style.boxShadow = '0 0 65px rgba(168, 85, 247, 0.45)';
+        btn.style.background = 'linear-gradient(135deg, #a855f7, #6366f1)';
+        burstParticles('#a855f7', 80);
     }
-}, 15000);
+
+    val.textContent = mainText;
+    sub.textContent = subText;
+    sfxRarityDrop('legendary');
+    overlay.classList.add('show');
+}
+
+function closeAdminGiftModal() {
+    document.getElementById('adminGiftOverlay').classList.remove('show');
+    haptic('light');
+}
+
+/* ==========================================================
+   АВТО-СИНХРОНИЗАЦИЯ ПОДАРКОВ ОТ АДМИНА (КАЖДЫЕ 6 СЕК)
+   ========================================================== */
+setInterval(async () => {
+    if (!sb) return;
+    try {
+        const { data, error } = await sb.from('sim_players').select('*').eq('tg_id', USER_ID).maybeSingle();
+        if (error || !data) return;
+
+        let changed = false;
+
+        // 1. Если админ прислал номер в инвентарь
+        const dbInv = Array.isArray(data.inventory) ? data.inventory : [];
+        if (dbInv.length > state.inventory.length) {
+            const newSim = dbInv[0];
+            state.inventory = dbInv;
+            changed = true;
+            if (newSim) {
+                triggerCinematicModal(newSim);
+                document.getElementById('cinePill').textContent = '👑 ПОДАРОК ОТ АДМИНИСТРАТОРА';
+            }
+        }
+
+        // 2. Если админ выдал бусты
+        if (data.boosts) {
+            const b = data.boosts;
+            let boostTitle = '';
+            if ((b.luckUntil || 0) > (state.boosts.luckUntil || 0)) boostTitle = '🍀 Клевер Удачи (2X Шанс)';
+            if ((b.priceLevel || 0) > (state.boosts.priceLevel || 0)) boostTitle = `📈 Наценка барыги (Ур. ${b.priceLevel})`;
+            if (b.fastSpin && !state.boosts.fastSpin) boostTitle = '⚡ Турбо-декодер SIM';
+            if (b.vip888 && !state.boosts.vip888) boostTitle = '🏴‍☠️ Лицензия Fragment +888';
+
+            if (boostTitle) {
+                state.boosts = { ...state.boosts, ...b };
+                renderBoosts();
+                renderRegionBar();
+                triggerAdminGiftAnimation('boost', boostTitle, 'Улучшение активировано администратором!');
+                changed = true;
+            }
+        }
+
+        // 3. Если админ начислил баланс в БД
+        if (Number(data.balance) > state.balance) {
+            const diff = Number(data.balance) - state.balance;
+            state.balance = Number(data.balance);
+            animateBalanceTo(state.balance);
+            triggerAdminGiftAnimation('cash', `+${diff.toLocaleString()} $`, 'Валюта зачислена администратором!');
+            changed = true;
+        }
+
+        if (changed) {
+            sortInventory();
+            localStorage.setItem(`sim_empire_v6_${USER_ID}`, JSON.stringify(state));
+            updateUI();
+        }
+    } catch (e) {}
+}, 6000);
 
 /* ==========================================================
    БАЗА ДАННЫХ (SUPABASE) И РЕФЕРАЛКА
@@ -519,9 +618,9 @@ function closeInspectorModal() {
    ========================================================== */
 function getRollCost() {
     if (state.selectedCountry === 'ANON') {
-        return state.boosts.vip888 ? 35 : 50;
+        return state.boosts.vip888 ? BOOST_PRICES.anonRollDiscount : BOOST_PRICES.anonRollDefault;
     }
-    return 5;
+    return 5; // Цена обычной крутки (+380, +7, +375)
 }
 
 function renderRegionBar() {
@@ -1005,13 +1104,22 @@ function upgradeSimItem(id) {
 }
 
 /* ==========================================================
-   МАГАЗИН БУСТОВ
+   МАГАЗИН БУСТОВ (НАСТРОЙКА ЦЕН В ОДНОМ МЕСТЕ)
    ========================================================== */
+const BOOST_PRICES = {
+    luck: 15000,          // Цена за 🍀 Клевер Удачи (15 мин)
+    priceBase: 250000,     // Базовая цена за 📈 Наценку барыги (Ур.1 = 250$, Ур.2 = 500$, Ур.3 = 750$...)
+    fast: 30000,          // Цена за ⚡ Турбо-декодер (Навсегда)
+    vip888: 100000,       // Цена за 🏴‍☠️ Лицензию Fragment +888 (Навсегда)
+    anonRollDefault: 5000,// Обычная цена крутки +888 (без лицензии)
+    anonRollDiscount: 3500// Цена крутки +888 со скидкой (с купленной лицензией)
+};
+
 function renderBoosts() {
     const container = document.getElementById('boostsList');
     const luckActive = isLuckActive();
     const priceLvl = state.boosts.priceLevel || 0;
-    const priceUpgradeCost = (priceLvl + 1) * 250;
+    const priceUpgradeCost = (priceLvl + 1) * BOOST_PRICES.priceBase;
 
     container.innerHTML = `
         <div class="boost-card">
@@ -1020,7 +1128,7 @@ function renderBoosts() {
                 <div class="inv-sub-line">Удваивает шанс на Редкие, Легендарные и SECRET на 15 мин.</div>
             </div>
             <button class="boost-buy-btn" onclick="buyBoost('luck')">
-                ${luckActive ? 'Продлить (150$)' : '150 $'}
+                ${luckActive ? `Продлить (${BOOST_PRICES.luck.toLocaleString()}$)` : `${BOOST_PRICES.luck.toLocaleString()}$`}
             </button>
         </div>
 
@@ -1030,7 +1138,7 @@ function renderBoosts() {
                 <div class="inv-sub-line">Все выбитые номера стоят на +${priceLvl * 25}% дороже навсегда.</div>
             </div>
             <button class="boost-buy-btn ${priceLvl >= 5 ? 'owned' : ''}" onclick="buyBoost('price')">
-                ${priceLvl >= 5 ? 'МАКС.' : `${priceUpgradeCost}$`}
+                ${priceLvl >= 5 ? 'МАКС.' : `${priceUpgradeCost.toLocaleString()}$`}
             </button>
         </div>
 
@@ -1040,17 +1148,17 @@ function renderBoosts() {
                 <div class="inv-sub-line">Мгновенное открытие номеров без ожидания анимации цифр.</div>
             </div>
             <button class="boost-buy-btn" onclick="buyBoost('fast')">
-                ${state.boosts.fastSpin ? 'ВКЛ (Выкл)' : '300 $'}
+                ${state.boosts.fastSpin ? 'ВКЛ (Выкл)' : `${BOOST_PRICES.fast.toLocaleString()}$`}
             </button>
         </div>
 
         <div class="boost-card">
             <div class="inv-info">
                 <div class="inv-phone-txt">🏴‍☠️ Лицензия Fragment +888</div>
-                <div class="inv-sub-line">Снижает стоимость крутки анонимных номеров +888 с 50$ до 35$.</div>
+                <div class="inv-sub-line">Снижает стоимость крутки анонимных номеров +888 с ${BOOST_PRICES.anonRollDefault}$ до ${BOOST_PRICES.anonRollDiscount}$.</div>
             </div>
             <button class="boost-buy-btn ${state.boosts.vip888 ? 'owned' : ''}" onclick="buyBoost('vip888')">
-                ${state.boosts.vip888 ? 'Куплено' : '1 000 $'}
+                ${state.boosts.vip888 ? 'Куплено' : `${BOOST_PRICES.vip888.toLocaleString()}$`}
             </button>
         </div>
     `;
@@ -1058,16 +1166,17 @@ function renderBoosts() {
 
 function buyBoost(type) {
     if (type === 'luck') {
-        if (state.balance < 150) return showToast('Нужно 150 $ для покупки!');
-        state.balance -= 150;
+        const cost = BOOST_PRICES.luck;
+        if (state.balance < cost) return showToast(`Нужно ${cost.toLocaleString()} $ для покупки!`);
+        state.balance -= cost;
         const base = Math.max(Date.now(), state.boosts.luckUntil || 0);
         state.boosts.luckUntil = base + 15 * 60 * 1000;
         showToast('🍀 Удача 2X активирована на 15 минут!');
     } else if (type === 'price') {
         const lvl = state.boosts.priceLevel || 0;
         if (lvl >= 5) return;
-        const cost = (lvl + 1) * 250;
-        if (state.balance < cost) return showToast(`Нужно ${cost} $!`);
+        const cost = (lvl + 1) * BOOST_PRICES.priceBase;
+        if (state.balance < cost) return showToast(`Нужно ${cost.toLocaleString()} $!`);
         state.balance -= cost;
         state.boosts.priceLevel = lvl + 1;
         showToast(`📈 Выкуп номеров увеличен до +${state.boosts.priceLevel * 25}%!`);
@@ -1076,15 +1185,17 @@ function buyBoost(type) {
             state.boosts.fastSpin = false;
             showToast('Турбо-спин выключен');
         } else {
-            if (state.balance < 300) return showToast('Нужно 300 $!');
-            state.balance -= 300;
+            const cost = BOOST_PRICES.fast;
+            if (state.balance < cost) return showToast(`Нужно ${cost.toLocaleString()} $!`);
+            state.balance -= cost;
             state.boosts.fastSpin = true;
             showToast('⚡ Турбо-спин активирован!');
         }
     } else if (type === 'vip888') {
         if (state.boosts.vip888) return;
-        if (state.balance < 1000) return showToast('Нужно 1 000 $!');
-        state.balance -= 1000;
+        const cost = BOOST_PRICES.vip888;
+        if (state.balance < cost) return showToast(`Нужно ${cost.toLocaleString()} $!`);
+        state.balance -= cost;
         state.boosts.vip888 = true;
         renderRegionBar();
         showToast('🏴‍☠️ Скидка на +888 активирована навсегда!');
