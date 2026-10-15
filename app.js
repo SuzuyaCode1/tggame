@@ -4,7 +4,7 @@
 const SUPABASE_URL = 'https://kuahcdodqqbotuawsrat.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_eO2K9Ts7jLGlZI8dS8xZdw_wSwcmC7F';
 const BOT_USERNAME = 'sim_empire_bot';
-const ADMIN_IDS = ['5268549164', '999999']; // Твой ID + тестовый ID для браузера
+const ADMIN_IDS = ['5268549164', '999999'];
 
 const tg = window.Telegram?.WebApp;
 if (tg) {
@@ -12,13 +12,11 @@ if (tg) {
     tg.ready();
 }
 
-// Инициализация Supabase (если ключи указаны)
 let sb = null;
 if (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase) {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
-// Данные текущего пользователя из Telegram
 const tgUser = tg?.initDataUnsafe?.user || {
     id: '999999',
     first_name: 'Web',
@@ -36,13 +34,22 @@ const COUNTRIES = [
 ];
 
 const RARITIES = [
-    { id: 'common', name: 'Обычный', chance: 65, min: 1, max: 4, color: '#94a3b8' },
-    { id: 'uncommon', name: 'Необычный', chance: 22, min: 6, max: 18, color: '#10b981' },
-    { id: 'rare', name: 'Редкий', chance: 9, min: 25, max: 90, color: '#3b82f6' },
-    { id: 'mythic', name: 'Мифический', chance: 3, min: 150, max: 500, color: '#a855f7' },
-    { id: 'legendary', name: 'Легендарный', chance: 0.85, min: 800, max: 2500, color: '#f59e0b' },
-    { id: 'secret', name: 'SECRET', chance: 0.15, min: 5000, max: 25000, color: '#ff0055', isSecret: true }
+    { id: 'common', tier: 1, name: 'Обычный', chance: 65, min: 1, max: 4, color: '#94a3b8' },
+    { id: 'uncommon', tier: 2, name: 'Необычный', chance: 22, min: 6, max: 18, color: '#10b981' },
+    { id: 'rare', tier: 3, name: 'Редкий', chance: 9, min: 25, max: 90, color: '#3b82f6' },
+    { id: 'mythic', tier: 4, name: 'Мифический', chance: 3, min: 150, max: 500, color: '#a855f7' },
+    { id: 'legendary', tier: 5, name: 'Легендарный', chance: 0.85, min: 800, max: 2500, color: '#f59e0b' },
+    { id: 'secret', tier: 6, name: 'SECRET', chance: 0.15, min: 5000, max: 25000, color: '#ff0055', isSecret: true }
 ];
+
+const RARITY_RANK = {
+    secret: 6,
+    legendary: 5,
+    mythic: 4,
+    rare: 3,
+    uncommon: 2,
+    common: 1
+};
 
 let state = {
     balance: 100,
@@ -67,6 +74,7 @@ let state = {
 let lastDroppedId = null;
 let displayedBalance = 100;
 let scrambleTimer = null;
+let cachedLeaderboardPlayers = [];
 
 /* ==========================================================
    SYNTH AUDIO ENGINE
@@ -101,6 +109,10 @@ function sfxTick(step = 0) { playTone(340 + step * 55, 'triangle', 0.04, 0.08); 
 function sfxCash() {
     playTone(987.77, 'sine', 0.09, 0.14);
     setTimeout(() => playTone(1318.51, 'sine', 0.18, 0.16), 70);
+}
+function sfxFail() {
+    playTone(220, 'sawtooth', 0.15, 0.12);
+    setTimeout(() => playTone(140, 'sawtooth', 0.25, 0.14), 100);
 }
 function sfxRarityDrop(rarityId) {
     if (rarityId === 'common') playTone(260, 'sine', 0.09, 0.09);
@@ -198,25 +210,55 @@ simStage.addEventListener('touchmove', e => {
 simStage.addEventListener('touchend', resetTilt);
 
 /* ==========================================================
-   БАЗА ДАННЫХ (SUPABASE + LOCALSTORAGE FALLBACK) И РЕФЕРАЛЫ
+   ИЕРАРХИЯ ИНВЕНТАРЯ И ПАССИВНЫЙ МАЙНИНГ (СТЕЙКИНГ)
+   ========================================================== */
+function sortInventory() {
+    state.inventory.sort((a, b) => {
+        const rankA = RARITY_RANK[a.rarity?.id] || 1;
+        const rankB = RARITY_RANK[b.rarity?.id] || 1;
+        if (rankB !== rankA) return rankB - rankA;
+        return (b.price || 0) - (a.price || 0);
+    });
+}
+
+// Считает пассивный доход в минуту от всех заблокированных (🔒) номеров (2% от их цены в минуту)
+function getPassiveIncomePerMin() {
+    const lockedTotal = state.inventory
+        .filter(i => i.locked)
+        .reduce((sum, i) => sum + (Number(i.price) || 0), 0);
+    return Math.floor(lockedTotal * 0.02);
+}
+
+// Начисление пассивного дохода каждые 15 секунд
+setInterval(() => {
+    const perMin = getPassiveIncomePerMin();
+    if (perMin >= 4) {
+        const tickReward = Math.max(1, Math.round(perMin / 4));
+        state.balance += tickReward;
+        state.earned += tickReward;
+        animateBalanceTo(state.balance);
+        saveGame();
+    }
+}, 15000);
+
+/* ==========================================================
+   БАЗА ДАННЫХ (SUPABASE) И РЕФЕРАЛКА
    ========================================================== */
 async function initApp() {
     document.getElementById('profName').textContent = USER_NAME;
     document.getElementById('profTgId').textContent = USER_ID;
+    document.getElementById('myRefCodeTxt').textContent = USER_ID;
     document.getElementById('admTargetId').value = USER_ID;
 
-    // Проверка прав администратора
     if (ADMIN_IDS.includes(USER_ID)) {
         document.getElementById('openAdminBtn').style.display = 'inline-block';
     }
 
-    // 1. Загружаем локальный сейв
-    const localSaved = localStorage.getItem(`sim_empire_v5_${USER_ID}`);
+    const localSaved = localStorage.getItem(`sim_empire_v6_${USER_ID}`);
     if (localSaved) {
         try { state = { ...state, ...JSON.parse(localSaved) }; } catch (e) {}
     }
 
-    // 2. Синхронизация с Supabase (если подключен)
     if (sb) {
         document.getElementById('dbStatusDot').textContent = '☁️ CLOUD КАПИТАЛ';
         const { data, error } = await sb.from('sim_players').select('*').eq('tg_id', USER_ID).maybeSingle();
@@ -236,13 +278,14 @@ async function initApp() {
         }
     }
 
-    // 3. Обработка реферального входа (?startapp=ref_12345)
     await checkReferralStartParam();
 
+    sortInventory();
     displayedBalance = state.balance;
     renderRegionBar();
     renderBoosts();
     updateUI();
+    loadLeaderboard();
 }
 
 async function syncToSupabase() {
@@ -265,33 +308,174 @@ async function syncToSupabase() {
 }
 
 function saveGame() {
-    localStorage.setItem(`sim_empire_v5_${USER_ID}`, JSON.stringify(state));
+    sortInventory();
+    localStorage.setItem(`sim_empire_v6_${USER_ID}`, JSON.stringify(state));
     updateUI();
     syncToSupabase();
 }
 
-async function checkReferralStartParam() {
-    const startParam = tg?.initDataUnsafe?.start_param || new URLSearchParams(window.location.search).get('startapp');
-    if (!startParam || !startParam.startsWith('ref_')) return;
-
-    const inviterId = startParam.replace('ref_', '');
-    if (inviterId === USER_ID || state.referredBy) return;
-
-    state.referredBy = inviterId;
-    state.balance += 250;
-    showToast('🎁 Бонус +250 $ за вход по приглашению!');
+async function applyReferralReward(inviterId) {
+    const cleanId = String(inviterId).replace('ref_', '').trim();
+    if (!cleanId || cleanId === USER_ID) {
+        showToast('❌ Нельзя ввести свой собственный ID!');
+        return false;
+    }
+    if (state.referredBy) {
+        showToast('⚠️ Ты уже получал реферальный бонус ранее');
+        return false;
+    }
 
     if (sb) {
-        const { data: inviter } = await sb.from('sim_players').select('*').eq('tg_id', inviterId).maybeSingle();
-        if (inviter) {
-            await sb.from('sim_players').update({
-                balance: Number(inviter.balance) + 250,
-                referrals_count: Number(inviter.referrals_count || 0) + 1,
-                ref_earnings: Number(inviter.ref_earnings || 0) + 250
-            }).eq('tg_id', inviterId);
+        const { data: inviter } = await sb.from('sim_players').select('*').eq('tg_id', cleanId).maybeSingle();
+        if (!inviter) {
+            showToast('❌ Игрок с таким ID не найден в базе');
+            return false;
+        }
+        await sb.from('sim_players').update({
+            balance: Number(inviter.balance) + 250,
+            referrals_count: Number(inviter.referrals_count || 0) + 1,
+            ref_earnings: Number(inviter.ref_earnings || 0) + 250
+        }).eq('tg_id', cleanId);
+    }
+
+    state.referredBy = cleanId;
+    state.balance += 250;
+    sfxCash();
+    haptic('success');
+    animateBalanceTo(state.balance);
+    saveGame();
+    showToast('🎉 Успешно! Начислено +250 $ тебе и другу!');
+    return true;
+}
+
+async function checkReferralStartParam() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
+
+    const rawParam = tg?.initDataUnsafe?.start_param 
+        || urlParams.get('tgWebAppStartParam') 
+        || urlParams.get('startapp') 
+        || hashParams.get('tgWebAppStartParam');
+
+    if (rawParam && rawParam.startsWith('ref_') && !state.referredBy) {
+        const inviterId = rawParam.replace('ref_', '').trim();
+        if (inviterId && inviterId !== USER_ID) {
+            await applyReferralReward(inviterId);
         }
     }
-    saveGame();
+}
+
+async function redeemManualRef() {
+    const inputVal = document.getElementById('manualRefInput').value.trim();
+    if (!inputVal) return showToast('Введи ID друга!');
+    await applyReferralReward(inputVal);
+}
+
+/* ==========================================================
+   ЛИДЕРБОРД И ПРОСМОТР ЧУЖИХ СЕЙФОВ
+   ========================================================== */
+async function loadLeaderboard() {
+    const listEl = document.getElementById('leaderboardList');
+    if (!sb) {
+        listEl.innerHTML = '<div style="text-align:center; color:var(--subtext); font-size:12px;">Подключи Supabase для общего рейтинга</div>';
+        return;
+    }
+
+    const { data, error } = await sb
+        .from('sim_players')
+        .select('tg_id, username, balance, inventory, rolls, secrets_count')
+        .limit(50);
+
+    if (error || !data) {
+        listEl.innerHTML = '<div style="text-align:center; color:var(--subtext); font-size:12px;">Не удалось загрузить рейтинг</div>';
+        return;
+    }
+
+    cachedLeaderboardPlayers = data.map(p => {
+        const inv = Array.isArray(p.inventory) ? p.inventory : [];
+        const invValue = inv.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+        const netWorth = Number(p.balance || 0) + invValue;
+        return {
+            tg_id: String(p.tg_id),
+            username: p.username || `ID ${p.tg_id}`,
+            balance: Number(p.balance || 0),
+            netWorth,
+            rolls: Number(p.rolls || 0),
+            secretsCount: Number(p.secrets_count || 0),
+            inventory: inv
+        };
+    }).sort((a, b) => b.netWorth - a.netWorth).slice(0, 15);
+
+    if (cachedLeaderboardPlayers.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center; color:var(--subtext); font-size:12px;">Пока нет игроков</div>';
+        return;
+    }
+
+    listEl.innerHTML = cachedLeaderboardPlayers.map((p, idx) => {
+        const rankIcon = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `${idx + 1}.`;
+        const isMe = p.tg_id === USER_ID ? 'me' : '';
+        return `
+            <div class="lb-row ${isMe}" onclick="inspectPlayer('${p.tg_id}')">
+                <div class="lb-left">
+                    <span class="lb-rank">${rankIcon}</span>
+                    <div>
+                        <div class="lb-name">${p.username} ${isMe ? '(Ты)' : ''}</div>
+                        <div class="lb-sub">Симок: ${p.inventory.length} шт. • Круток: ${p.rolls}</div>
+                    </div>
+                </div>
+                <div class="lb-score">${p.netWorth.toLocaleString()} $ ›</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function inspectPlayer(tgId) {
+    const player = cachedLeaderboardPlayers.find(p => p.tg_id === String(tgId));
+    if (!player) return;
+
+    haptic('light');
+    document.getElementById('inspName').textContent = `👤 ${player.username}`;
+    document.getElementById('inspStatsBar').innerHTML = `
+        <div class="insp-stat-box"><span>Капитал</span><b>${player.netWorth.toLocaleString()} $</b></div>
+        <div class="insp-stat-box"><span>Круток</span><b style="color:#fff;">${player.rolls}</b></div>
+        <div class="insp-stat-box"><span>SECRET</span><b style="color:#ff0055;">${player.secretsCount}</b></div>
+    `;
+
+    const simList = document.getElementById('inspSimList');
+    const sortedInv = [...player.inventory].sort((a, b) => (b.price || 0) - (a.price || 0)).slice(0, 5);
+
+    if (sortedInv.length === 0) {
+        simList.innerHTML = '<div style="text-align:center; color:var(--subtext); padding:20px; font-size:13px;">У игрока пока нет сохраненных номеров в сейфе</div>';
+    } else {
+        simList.innerHTML = sortedInv.map(item => {
+            const badge = item.rarity?.isSecret
+                ? `<span class="secret-blur" style="padding:2px 6px; border-radius:5px; font-weight:900;">SECRET</span>`
+                : `<span style="color:${item.rarity?.color || '#94a3b8'}; font-weight:800;">${item.rarity?.name || 'SIM'}</span>`;
+            const iconHtml = item.countryId === 'ANON' ? `<span>🏴‍☠️</span>` : `<img src="${item.flag}" alt="">`;
+            return `
+                <div class="inv-row-card" style="border-left-color: ${item.rarity?.color || '#94a3b8'}">
+                    <div class="inv-info">
+                        <div class="inv-phone-line">
+                            ${iconHtml}
+                            <span class="inv-phone-txt">${item.number}</span>
+                        </div>
+                        <div class="inv-sub-line">
+                            ${badge} • <span>${item.patternTitle || item.countryName}</span>
+                        </div>
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-weight:800; color:#10b981; font-size:14px;">
+                        ${Number(item.price || 0).toLocaleString()} $
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    document.getElementById('inspectorModal').classList.add('show');
+}
+
+function closeInspectorModal() {
+    document.getElementById('inspectorModal').classList.remove('show');
 }
 
 /* ==========================================================
@@ -384,7 +568,6 @@ function buildNumberTailWithReason(rarityId, isAnon = false) {
     let d2 = randDigit();
     while (d2 === d1) d2 = randDigit();
 
-    // Эксклюзивные комбинации для +888
     if (isAnon && rarityId === 'secret') {
         const anonSecrets = [
             {
@@ -523,7 +706,6 @@ function buildSimItem(country, rarity) {
     const op = country.ops[randInt(0, country.ops.length - 1)];
     const patternData = buildNumberTailWithReason(rarity.id, country.isAnon);
 
-    // Базовая цена + множитель x10 для +888 + бонус прокачки цен
     const anonMult = country.isAnon ? 10 : 1;
     const boostMult = 1 + (state.boosts.priceLevel || 0) * 0.25;
     const rawPrice = randInt(rarity.min, rarity.max) * anonMult * boostMult;
@@ -544,6 +726,7 @@ function buildSimItem(country, rarity) {
         flag: country.flag,
         rarity: rarity,
         price: price,
+        locked: false,
         patternTitle: patternData.patternTitle,
         patternDesc: patternData.patternDesc
     };
@@ -749,6 +932,43 @@ function closeCineModal() {
 }
 
 /* ==========================================================
+   РИСК-АПГРЕЙД НОМЕРА (2X ЦЕНА И ПОВЫШЕНИЕ ТИРА С ШАНСОМ 45%)
+   ========================================================== */
+function upgradeSimItem(id) {
+    const idx = state.inventory.findIndex(i => i.id === id);
+    if (idx === -1) return;
+    const item = state.inventory[idx];
+
+    if (item.locked) {
+        haptic('warning');
+        return showToast('🔒 Сними замок перед риск-апгрейдом!');
+    }
+
+    const win = Math.random() < 0.45;
+    if (win) {
+        item.price = Math.round(item.price * 2);
+        const currentRank = RARITY_RANK[item.rarity.id] || 1;
+        if (currentRank < 6) {
+            const nextRarity = RARITIES.find(r => r.tier === currentRank + 1);
+            if (nextRarity) item.rarity = nextRarity;
+        }
+        if (item.price > state.bestDrop) state.bestDrop = item.price;
+
+        sfxRarityDrop('rare');
+        haptic('success');
+        burstParticles(item.rarity.color, 40);
+        showToast(`🔥 АПГРЕЙД УСПЕШЕН! Новая цена: ${item.price.toLocaleString()} $`);
+    } else {
+        state.inventory.splice(idx, 1);
+        sfxFail();
+        haptic('error');
+        showToast(`💥 Номер ${item.number} сгорел при перепрошивке!`);
+    }
+
+    saveGame();
+}
+
+/* ==========================================================
    МАГАЗИН БУСТОВ
    ========================================================== */
 function renderBoosts() {
@@ -764,7 +984,7 @@ function renderBoosts() {
                 <div class="inv-sub-line">Удваивает шанс на Редкие, Легендарные и SECRET на 15 мин.</div>
             </div>
             <button class="boost-buy-btn" onclick="buyBoost('luck')">
-                ${luckActive ? 'Активно (+15м: 150$)' : '150 $'}
+                ${luckActive ? 'Продлить (150$)' : '150 $'}
             </button>
         </div>
 
@@ -784,7 +1004,7 @@ function renderBoosts() {
                 <div class="inv-sub-line">Мгновенное открытие номеров без ожидания анимации цифр.</div>
             </div>
             <button class="boost-buy-btn" onclick="buyBoost('fast')">
-                ${state.boosts.fastSpin ? 'ВКЛ (Нажми выкл)' : '300 $'}
+                ${state.boosts.fastSpin ? 'ВКЛ (Выкл)' : '300 $'}
             </button>
         </div>
 
@@ -850,7 +1070,7 @@ function getInviteLink() {
 
 function shareInviteLink() {
     const link = getInviteLink();
-    const text = 'Залетай в SIM Empire! Выбивай блатные номера +888 и лутай +250$ бонуса по моей ссылке 🔥';
+    const text = `Залетай в SIM Empire! Выбивай блатные номера +888 и вводи мой код ${USER_ID} (или жми по ссылке) ради +250$ бонуса 🔥`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
     if (tg?.openTelegramLink) {
         tg.openTelegramLink(shareUrl);
@@ -872,14 +1092,10 @@ function copyMyId() {
 }
 
 /* ==========================================================
-   АДМИН-ПАНЕЛЬ (ВЫДАЧА ВАЛЮТЫ И НОМЕРОВ ИГРОКАМ)
+   АДМИН-ПАНЕЛЬ
    ========================================================== */
-function openAdminModal() {
-    document.getElementById('adminModal').classList.add('show');
-}
-function closeAdminModal() {
-    document.getElementById('adminModal').classList.remove('show');
-}
+function openAdminModal() { document.getElementById('adminModal').classList.add('show'); }
+function closeAdminModal() { document.getElementById('adminModal').classList.remove('show'); }
 
 async function adminGiveCash() {
     const targetId = document.getElementById('admTargetId').value.trim();
@@ -894,12 +1110,13 @@ async function adminGiveCash() {
         return;
     }
 
-    if (!sb) return showToast('Для выдачи другим игрокам подключи ключи Supabase в app.js');
+    if (!sb) return showToast('Нет связи с БД');
     const { data: user } = await sb.from('sim_players').select('balance').eq('tg_id', targetId).maybeSingle();
     if (!user) return showToast('Игрок с таким ID не найден в БД');
 
     await sb.from('sim_players').update({ balance: Number(user.balance) + amount }).eq('tg_id', targetId);
     showToast(`✅ Игроку ${targetId} начислено +${amount} $!`);
+    loadLeaderboard();
 }
 
 async function adminGiveNumber() {
@@ -919,7 +1136,7 @@ async function adminGiveNumber() {
         return;
     }
 
-    if (!sb) return showToast('Для отправки другим игрокам подключи ключи Supabase');
+    if (!sb) return showToast('Нет связи с БД');
     const { data: user } = await sb.from('sim_players').select('inventory').eq('tg_id', targetId).maybeSingle();
     if (!user) return showToast('Игрок не найден в БД');
 
@@ -940,7 +1157,7 @@ async function adminGiveLuck() {
         return;
     }
 
-    if (!sb) return showToast('Подключи Supabase для выдачи другим игрокам');
+    if (!sb) return showToast('Нет связи с БД');
     const { data: user } = await sb.from('sim_players').select('boosts').eq('tg_id', targetId).maybeSingle();
     if (!user) return showToast('Игрок не найден');
 
@@ -950,13 +1167,25 @@ async function adminGiveLuck() {
 }
 
 /* ==========================================================
-   ПРОДАЖА И ОБНОВЛЕНИЕ UI
+   ЗАМОК НА НОМЕРА (БЛОКИРОВКА) И ПРОДАЖА
    ========================================================== */
+function toggleLockItem(id) {
+    const item = state.inventory.find(i => i.id === id);
+    if (!item) return;
+    item.locked = !item.locked;
+    haptic('light');
+    playTone(item.locked ? 600 : 380, 'sine', 0.06, 0.09);
+    showToast(item.locked ? '🔒 Номер защищен и приносит пассивный доход!' : '🔓 Защита снята');
+    saveGame();
+}
+
 function sellLastDrop(e) {
     if (!lastDroppedId) return;
     const idx = state.inventory.findIndex(i => i.id === lastDroppedId);
     if (idx === -1) return;
     const item = state.inventory[idx];
+    if (item.locked) return showToast('🔒 Этот номер заблокирован!');
+
     state.balance += item.price;
     state.earned += item.price;
     state.inventory.splice(idx, 1);
@@ -974,6 +1203,12 @@ function sellFromInventory(id, e) {
     const idx = state.inventory.findIndex(i => i.id === id);
     if (idx === -1) return;
     const item = state.inventory[idx];
+
+    if (item.locked) {
+        haptic('warning');
+        return showToast('🔒 Сними замок, чтобы продать этот номер!');
+    }
+
     state.balance += item.price;
     state.earned += item.price;
     state.inventory.splice(idx, 1);
@@ -991,13 +1226,13 @@ function sellFromInventory(id, e) {
 }
 
 function sellTrash(e) {
-    const trash = state.inventory.filter(i => ['common', 'uncommon'].includes(i.rarity.id));
-    if (trash.length === 0) return showToast('Нет обычных номеров для слива');
+    const trash = state.inventory.filter(i => !i.locked && ['common', 'uncommon'].includes(i.rarity.id));
+    if (trash.length === 0) return showToast('Нет открытых обычных номеров для слива');
     let sum = 0;
     trash.forEach(i => sum += i.price);
     state.balance += sum;
     state.earned += sum;
-    state.inventory = state.inventory.filter(i => !['common', 'uncommon'].includes(i.rarity.id));
+    state.inventory = state.inventory.filter(i => i.locked || !['common', 'uncommon'].includes(i.rarity.id));
 
     sfxCash();
     haptic('success');
@@ -1009,13 +1244,15 @@ function sellTrash(e) {
 }
 
 function sellAll(e) {
-    if (state.inventory.length === 0) return;
+    const sellable = state.inventory.filter(i => !i.locked);
+    if (sellable.length === 0) return showToast('Все номера в сейфе защищены замком 🔒!');
+
     let sum = 0;
-    state.inventory.forEach(i => sum += i.price);
-    const count = state.inventory.length;
+    sellable.forEach(i => sum += i.price);
+    const count = sellable.length;
     state.balance += sum;
     state.earned += sum;
-    state.inventory = [];
+    state.inventory = state.inventory.filter(i => i.locked);
     lastDroppedId = null;
 
     sfxCash();
@@ -1023,7 +1260,7 @@ function sellAll(e) {
     animateBalanceTo(state.balance);
     if (e?.clientX) spawnFloatingCash(e.clientX, e.clientY, sum);
     document.getElementById('actionBar').classList.remove('visible');
-    showToast(`Продано ${count} шт. за +${sum.toLocaleString()} $`);
+    showToast(`Продано ${count} шт. за +${sum.toLocaleString()} $ (🔒 сохранены)`);
     saveGame();
 }
 
@@ -1074,6 +1311,9 @@ function updateUI() {
     document.getElementById('invTitleCount').textContent = state.inventory.length;
     document.getElementById('dockCounter').textContent = state.inventory.length;
 
+    const passivePerMin = getPassiveIncomePerMin();
+    document.getElementById('passiveIncomeDisplay').textContent = `🔒 Пассив с сейфа: +${passivePerMin.toLocaleString()} $/мин`;
+
     document.getElementById('luckBadge').style.display = isLuckActive() ? 'block' : 'none';
 
     document.getElementById('statRolls').textContent = state.rolls.toLocaleString();
@@ -1083,6 +1323,11 @@ function updateUI() {
 
     document.getElementById('refCountVal').textContent = `${state.referralsCount || 0} чел.`;
     document.getElementById('refEarnedVal').textContent = `${(state.refEarnings || 0).toLocaleString()} $`;
+
+    const manualBox = document.getElementById('manualRefBox');
+    if (manualBox) {
+        manualBox.style.display = state.referredBy ? 'none' : 'block';
+    }
 
     const list = document.getElementById('invList');
     if (state.inventory.length === 0) {
@@ -1098,8 +1343,10 @@ function updateUI() {
             ? `<span>🏴‍☠️</span>`
             : `<img src="${item.flag}" alt="">`;
 
+        const isLocked = !!item.locked;
+
         return `
-            <div class="inv-row-card" style="border-left-color: ${item.rarity.color}">
+            <div class="inv-row-card ${isLocked ? 'is-locked' : ''}" style="border-left-color: ${item.rarity.color}">
                 <div class="inv-info">
                     <div class="inv-phone-line">
                         ${iconHtml}
@@ -1109,9 +1356,17 @@ function updateUI() {
                         ${badge} • <span>${item.patternTitle || item.countryName}</span>
                     </div>
                 </div>
-                <button class="inv-sell-trigger" onclick="sellFromInventory(${item.id}, event)">
-                    +${item.price.toLocaleString()} $
-                </button>
+                <div class="inv-actions-right">
+                    <button class="upgrade-sim-btn" onclick="upgradeSimItem(${item.id})" title="Шанс 45% удвоить цену">
+                        ⚡2X
+                    </button>
+                    <button class="lock-btn ${isLocked ? 'locked' : ''}" onclick="toggleLockItem(${item.id})" title="Защитить и получать пассивный доход">
+                        ${isLocked ? '🔒' : '🔓'}
+                    </button>
+                    <button class="inv-sell-trigger ${isLocked ? 'disabled-lock' : ''}" onclick="sellFromInventory(${item.id}, event)">
+                        ${isLocked ? 'Стейкинг' : `+${item.price.toLocaleString()}$`}
+                    </button>
+                </div>
             </div>
         `;
     }).join('');
@@ -1123,6 +1378,7 @@ function switchTab(tabId, btn) {
     document.getElementById(`tab-${tabId}`).classList.add('active');
     btn.classList.add('active');
     if (tabId === 'boosts') renderBoosts();
+    if (tabId === 'prof') loadLeaderboard();
     haptic('light');
 }
 
