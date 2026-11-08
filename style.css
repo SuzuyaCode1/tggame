@@ -35,6 +35,114 @@ body {
     position: relative;
 }
 
+/* ЭКРАН ТЕХНИЧЕСКОГО ПЕРЕРЫВА (ПОЛНЫЙ ЧЕРНЫЙ ЭКРАН) */
+.maintenance-screen {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: #000000;
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 24px;
+    box-sizing: border-box;
+    text-align: center;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.maintenance-glow {
+    position: absolute;
+    width: 320px;
+    height: 320px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.22) 0%, rgba(139, 92, 246, 0.12) 40%, transparent 70%);
+    filter: blur(65px);
+    border-radius: 50%;
+    animation: pulseGlow 4s ease-in-out infinite alternate;
+    pointer-events: none;
+}
+
+.maintenance-content {
+    position: relative;
+    z-index: 2;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.maintenance-icon {
+    font-size: 44px;
+    margin-bottom: 14px;
+    animation: iconFloat 2.6s ease-in-out infinite alternate;
+}
+
+.maintenance-title {
+    font-family: 'Outfit', sans-serif;
+    font-size: 26px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: #ffffff;
+    animation: titlePulse 2.8s ease-in-out infinite alternate;
+}
+
+.maintenance-divider {
+    width: 50px;
+    height: 3px;
+    border-radius: 99px;
+    background: linear-gradient(90deg, #3b82f6, #a855f7);
+    margin: 18px 0;
+    animation: expandLine 2.8s ease-in-out infinite alternate;
+}
+
+.maintenance-reason {
+    font-family: 'Outfit', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.55;
+    color: #94a3b8;
+    max-width: 330px;
+    animation: reasonFade 2.8s ease-in-out infinite alternate;
+}
+
+@keyframes titlePulse {
+    0% {
+        opacity: 0.82;
+        transform: scale(0.98);
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1.03);
+        text-shadow: 0 0 24px rgba(59, 130, 246, 0.65), 0 0 40px rgba(168, 85, 247, 0.4);
+    }
+}
+
+@keyframes reasonFade {
+    0% { opacity: 0.6; }
+    100% { opacity: 0.95; }
+}
+
+@keyframes expandLine {
+    0% { width: 35px; opacity: 0.5; }
+    100% { width: 75px; opacity: 1; }
+}
+
+@keyframes pulseGlow {
+    0% { transform: scale(0.85); opacity: 0.25; }
+    100% { transform: scale(1.2); opacity: 0.45; }
+}
+
+@keyframes iconFloat {
+    0% { transform: translateY(0px) rotate(-6deg); }
+    100% { transform: translateY(-8px) rotate(6deg); }
+}
+
 /* Живой неоновый фон */
 .ambient-bg {
     position: fixed;
@@ -790,7 +898,7 @@ body {
     flex-wrap: wrap;
 }
 
-/* Правый блок кнопок в карточке инвентаря (⚡2X + Замок SAFE + Продажа) */
+/* Правый блок кнопок в карточке инвентаря */
 .inv-actions-right {
     display: flex;
     align-items: center;
@@ -816,7 +924,6 @@ body {
     transform: scale(0.92);
 }
 
-/* Премиальная SVG-кнопка блокировки (Сейф-замок) */
 .lock-btn {
     height: 36px;
     padding: 0 10px;
@@ -959,12 +1066,6 @@ body {
     font-weight: 800;
     font-size: 14px;
     cursor: pointer;
-}
-
-.manual-ref-box {
-    margin-top: 16px;
-    padding-top: 14px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* Профиль, Лидерборд и Админка */
@@ -1313,7 +1414,6 @@ body {
     transform: translateX(-50%) translateY(0);
 }
 
-/* Карточка анимации подарка от Админа */
 .admin-gift-showcase {
     width: 100%;
     background: linear-gradient(145deg, rgba(20, 34, 46, 0.95) 0%, rgba(9, 14, 24, 0.98) 100%);

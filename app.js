@@ -81,6 +81,22 @@ let scrambleTimer = null;
 let cachedLeaderboardPlayers = [];
 
 /* ==========================================================
+   УПРАВЛЕНИЕ ТЕХНИЧЕСКИМ ПЕРЕРЫВОМ
+   ========================================================== */
+function setMaintenance(isActive, reasonText = '') {
+    const screen = document.getElementById('maintenanceScreen');
+    const reasonEl = document.getElementById('maintenanceReasonText');
+    if (!screen) return;
+
+    if (isActive) {
+        if (reasonText && reasonEl) reasonEl.textContent = reasonText;
+        screen.style.display = 'flex';
+    } else {
+        screen.style.display = 'none';
+    }
+}
+
+/* ==========================================================
    SYNTH AUDIO ENGINE
    ========================================================== */
 let audioCtx = null;
@@ -285,7 +301,7 @@ function closeAdminGiftModal() {
 }
 
 /* ==========================================================
-   АВТО-СИНХРОНИЗАЦИЯ ПОДАРКОВ ОТ АДМИНА (КАЖДЫЕ 6 СЕК)
+   АВТО-СИНХРОНИЗАЦИЯ ПОДАРКОВ ОТ АДМИНА
    ========================================================== */
 setInterval(async () => {
     if (!sb) return;
@@ -295,7 +311,6 @@ setInterval(async () => {
 
         let changed = false;
 
-        // 1. Если админ прислал номер в инвентарь
         const dbInv = Array.isArray(data.inventory) ? data.inventory : [];
         if (dbInv.length > state.inventory.length) {
             const newSim = dbInv[0];
@@ -307,7 +322,6 @@ setInterval(async () => {
             }
         }
 
-        // 2. Если админ выдал бусты
         if (data.boosts) {
             const b = data.boosts;
             let boostTitle = '';
@@ -325,7 +339,6 @@ setInterval(async () => {
             }
         }
 
-        // 3. Если админ начислил баланс в БД
         if (Number(data.balance) > state.balance) {
             const diff = Number(data.balance) - state.balance;
             state.balance = Number(data.balance);
@@ -485,13 +498,12 @@ async function redeemManualRef() {
 }
 
 /* ==========================================================
-   ЛИДЕРБОРД И ПРОСМОТР ЧУЖИХ СЕЙФОВ (С ЗАЩИТОЙ ОТ ОШИБОК БД)
+   ЛИДЕРБОРД
    ========================================================== */
 async function loadLeaderboard() {
     const listEl = document.getElementById('leaderboardList');
     const hintEl = document.getElementById('lbStatusHint');
 
-    // Сразу обеспечиваем себе место в списке на случай, если БД еще не настроена
     const myInvVal = state.inventory.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
     const myEntry = {
         tg_id: USER_ID,
@@ -507,7 +519,6 @@ async function loadLeaderboard() {
 
     if (sb) {
         try {
-            // Сначала синхронизируем себя в базу
             await syncToSupabase();
             const { data, error } = await sb
                 .from('sim_players')
@@ -516,7 +527,7 @@ async function loadLeaderboard() {
 
             if (error) {
                 console.warn('Leaderboard error:', error.message);
-                if (hintEl) hintEl.textContent = `Локальный режим (Выполни SQL в Supabase: ${error.code || 'нет таблицы'})`;
+                if (hintEl) hintEl.textContent = `Локальный режим (таблица не найдена)`;
             } else if (data && data.length > 0) {
                 rowsFromDb = data;
                 if (hintEl) hintEl.textContent = 'Нажми на игрока, чтобы посмотреть его сейф';
@@ -542,7 +553,6 @@ async function loadLeaderboard() {
             };
         }).sort((a, b) => b.netWorth - a.netWorth).slice(0, 15);
     } else {
-        // Резервный список, чтобы Лидерборд всегда работал и не писал ошибку
         cachedLeaderboardPlayers = [myEntry];
     }
 
@@ -614,13 +624,13 @@ function closeInspectorModal() {
 }
 
 /* ==========================================================
-   РЕГИОНЫ И АНОНИМНЫЕ НОМЕРА +888
+   РЕГИОНЫ И ЦЕНЫ
    ========================================================== */
 function getRollCost() {
     if (state.selectedCountry === 'ANON') {
         return state.boosts.vip888 ? BOOST_PRICES.anonRollDiscount : BOOST_PRICES.anonRollDefault;
     }
-    return 5; // Цена обычной крутки (+380, +7, +375)
+    return 5;
 }
 
 function renderRegionBar() {
@@ -670,7 +680,7 @@ function selectCountry(id) {
 }
 
 /* ==========================================================
-   ГЕНЕРАТОР ПАТТЕРНОВ (+888 И КЛАССИЧЕСКИЕ ОПЕРАТОРЫ)
+   ГЕНЕРАТОР ПАТТЕРНОВ
    ========================================================== */
 function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 function randDigit() { return Math.floor(Math.random() * 10).toString(); }
@@ -708,7 +718,7 @@ function buildNumberTailWithReason(rarityId, isAnon = false) {
             {
                 tail: '777', isShortAnon: true, hlStart: 0,
                 patternTitle: '🏴‍☠️ УЛЬТРА-КОРОТКИЙ NFT (+888 0 777)',
-                patternDesc: 'Четырехзначный анонимный номер Telegram! Такие лоты на Fragment стоят десятки тысяч долларов.'
+                patternDesc: 'Четырехзначный анонимный номер Telegram! Такие лоты на Fragment стоят тысячи долларов.'
             },
             {
                 tail: '8888888', hlStart: 0,
@@ -1067,7 +1077,7 @@ function closeCineModal() {
 }
 
 /* ==========================================================
-   РИСК-АПГРЕЙД НОМЕРА (2X ЦЕНА И ПОВЫШЕНИЕ ТИРА С ШАНСОМ 45%)
+   РИСК-АПГРЕЙД НОМЕРА
    ========================================================== */
 function upgradeSimItem(id) {
     const idx = state.inventory.findIndex(i => i.id === id);
@@ -1104,15 +1114,15 @@ function upgradeSimItem(id) {
 }
 
 /* ==========================================================
-   МАГАЗИН БУСТОВ (НАСТРОЙКА ЦЕН В ОДНОМ МЕСТЕ)
+   МАГАЗИН БУСТОВ
    ========================================================== */
 const BOOST_PRICES = {
-    luck: 15000,          // Цена за 🍀 Клевер Удачи (15 мин)
-    priceBase: 250000,     // Базовая цена за 📈 Наценку барыги (Ур.1 = 250$, Ур.2 = 500$, Ур.3 = 750$...)
-    fast: 30000,          // Цена за ⚡ Турбо-декодер (Навсегда)
-    vip888: 100000,       // Цена за 🏴‍☠️ Лицензию Fragment +888 (Навсегда)
-    anonRollDefault: 5000,// Обычная цена крутки +888 (без лицензии)
-    anonRollDiscount: 3500// Цена крутки +888 со скидкой (с купленной лицензией)
+    luck: 15000,
+    priceBase: 250000,
+    fast: 30000,
+    vip888: 100000,
+    anonRollDefault: 5000,
+    anonRollDiscount: 3500
 };
 
 function renderBoosts() {
@@ -1209,7 +1219,7 @@ function buyBoost(type) {
 }
 
 /* ==========================================================
-   РЕФЕРАЛЬНЫЕ ССЫЛКИ В TELEGRAM
+   РЕФЕРАЛЬНЫЕ ССЫЛКИ
    ========================================================== */
 function getInviteLink() {
     return `https://t.me/${BOT_USERNAME}?startapp=ref_${USER_ID}`;
@@ -1239,63 +1249,7 @@ function copyMyId() {
 }
 
 /* ==========================================================
-   АВТО-СИНХРОНИЗАЦИЯ ПОДАРКОВ ОТ АДМИНА (КАЖДЫЕ 6 СЕК)
-   ========================================================== */
-setInterval(async () => {
-    if (!sb) return;
-    try {
-        const { data, error } = await sb.from('sim_players').select('*').eq('tg_id', USER_ID).maybeSingle();
-        if (error || !data) return;
-
-        let changed = false;
-
-        // Если админ начислил баланс в БД
-        if (Number(data.balance) > state.balance) {
-            const diff = Number(data.balance) - state.balance;
-            state.balance = Number(data.balance);
-            animateBalanceTo(state.balance);
-            showToast(`🎁 Получено +${diff.toLocaleString()} $!`);
-            sfxCash();
-            changed = true;
-        }
-
-        // Если админ прислал номер в инвентарь
-        const dbInv = Array.isArray(data.inventory) ? data.inventory : [];
-        if (dbInv.length > state.inventory.length) {
-            state.inventory = dbInv;
-            showToast('📲 Получен новый номер в Сейф!');
-            sfxRarityDrop('rare');
-            changed = true;
-        }
-
-        // Если админ выдал бусты
-        if (data.boosts) {
-            const b = data.boosts;
-            if (
-                (b.luckUntil || 0) > (state.boosts.luckUntil || 0) ||
-                (b.priceLevel || 0) > (state.boosts.priceLevel || 0) ||
-                (b.fastSpin && !state.boosts.fastSpin) ||
-                (b.vip888 && !state.boosts.vip888)
-            ) {
-                state.boosts = { ...state.boosts, ...b };
-                renderBoosts();
-                renderRegionBar();
-                showToast('🚀 Администратор выдал тебе буст!');
-                sfxCash();
-                changed = true;
-            }
-        }
-
-        if (changed) {
-            sortInventory();
-            localStorage.setItem(`sim_empire_v6_${USER_ID}`, JSON.stringify(state));
-            updateUI();
-        }
-    } catch (e) {}
-}, 6000);
-
-/* ==========================================================
-   АДМИН-ПАНЕЛЬ (ВЫДАЧА ВАЛЮТЫ, БУСТОВ И НОМЕРОВ)
+   АДМИН-ПАНЕЛЬ
    ========================================================== */
 async function openAdminModal() {
     document.getElementById('adminModal').classList.add('show');
@@ -1309,7 +1263,7 @@ async function openAdminModal() {
 
     const { data, error } = await sb.from('sim_players').select('tg_id, username, balance').order('updated_at', { ascending: false }).limit(50);
     if (error) {
-        document.getElementById('admStatusLog').textContent = `❌ Ошибка БД: ${error.message} (выполни SQL запрос в Supabase!)`;
+        document.getElementById('admStatusLog').textContent = `❌ Ошибка БД: ${error.message}`;
         return;
     }
 
@@ -1337,7 +1291,6 @@ function setAdminLog(msg, isError = false) {
     showToast(msg);
 }
 
-// Вспомогательная загрузка или создание профиля целевого игрока в БД
 async function getOrCreateTargetPlayer(targetId) {
     const { data, error } = await sb.from('sim_players').select('*').eq('tg_id', targetId).maybeSingle();
     if (error) throw new Error(error.message);
@@ -1476,7 +1429,7 @@ async function adminGiveNumber() {
 }
 
 /* ==========================================================
-   ЗАМОК НА НОМЕРА (БЛОКИРОВКА) И ПРОДАЖА
+   ЗАМОК И ПРОДАЖА
    ========================================================== */
 function toggleLockItem(id) {
     const item = state.inventory.find(i => i.id === id);
@@ -1633,7 +1586,6 @@ function updateUI() {
     document.getElementById('refCountVal').textContent = `${state.referralsCount || 0} чел.`;
     document.getElementById('refEarnedVal').textContent = `${(state.refEarnings || 0).toLocaleString()} $`;
 
-    // Отображение блока ввода реф-кода
     const manualBox = document.getElementById('manualRefBox');
     const claimedBox = document.getElementById('refAlreadyClaimedBox');
     if (manualBox && claimedBox) {

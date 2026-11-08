@@ -9,9 +9,22 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700;800&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=10">
+    <link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
+
+    <!-- ЭКРАН ТЕХНИЧЕСКОГО ПЕРЕРЫВА -->
+    <div class="maintenance-screen" id="maintenanceScreen">
+        <div class="maintenance-glow"></div>
+        <div class="maintenance-content">
+            <div class="maintenance-icon">⚡</div>
+            <h1 class="maintenance-title">Игра на тех.перерыве</h1>
+            <div class="maintenance-divider"></div>
+            <p class="maintenance-reason" id="maintenanceReasonText">
+                Ведутся технические работы по обновлению серверов и добавлению новых номеров. Скоро вернемся в строй!
+            </p>
+        </div>
+    </div>
 
     <div class="ambient-bg">
         <div class="ambient-orb orb-1" id="orb1"></div>
@@ -103,7 +116,7 @@
         </div>
     </div>
 
-   <!-- МОДАЛКА АДМИН-ПАНЕЛИ -->
+    <!-- МОДАЛКА АДМИН-ПАНЕЛИ -->
     <div class="admin-modal" id="adminModal">
         <div class="admin-box">
             <div class="admin-header">
@@ -245,7 +258,6 @@
                 <div class="section-h1">🤝 Партнерская сеть</div>
             </div>
 
-            <!-- БЛОК ВВОДА КОДА ДРУГА ТЕПЕРЬ СВЕРХУ И ВСЕГДА ВИДЕН -->
             <div class="ref-hero-card" style="margin-bottom: 12px; border-color: rgba(16, 185, 129, 0.4); background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(18, 23, 38, 0.85));">
                 <div style="font-size: 15px; font-weight: 900; color: #34d399; margin-bottom: 6px;">💸 Введи ID друга и получи +250 $</div>
                 <div style="font-size: 12px; color: #cbd5e1; margin-bottom: 10px;">Если тебя позвал кент — впиши его Telegram ID ниже, и вы оба сразу получите по <b>250 $</b>!</div>
@@ -374,6 +386,6 @@
         </button>
     </div>
 
-    <script src="app.js?v=10"></script>
+    <script src="app.js?v=11"></script>
 </body>
 </html>
